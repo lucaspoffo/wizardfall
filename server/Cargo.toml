@@ -10,4 +10,6 @@ edition = "2018"
 renet = { path = "../../renet" }
 shared = { path = "../shared" }
 bincode = "1.3.1"
+log = "0.4.11"
+alto_logger = "0.3.6"
 

@@ -1,18 +1,22 @@
 use shared::{channels, Player, PlayerInput, ServerFrame};
 
+use alto_logger::TermLogger;
 use bincode::{deserialize, serialize};
 use renet::{
     endpoint::EndpointConfig,
     error::RenetError,
     protocol::unsecure::UnsecureServerProtocol,
-    server::{ServerEvent, Server, ServerConfig},
+    server::{Server, ServerConfig, ServerEvent},
 };
+
 use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 fn main() -> Result<(), RenetError> {
+    TermLogger::default().init().unwrap();
+
     let ip = "127.0.0.1:5000".to_string();
     server(ip)?;
     Ok(())
@@ -57,7 +61,6 @@ fn server(ip: String) -> Result<(), RenetError> {
         for (client_id, messages) in server.get_messages_from_channel(0).iter() {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
-                println!("Client {}: {:?}", client_id, input);
                 server_state.set_player_input(*client_id, input);
             }
         }

@@ -2,6 +2,7 @@
 use macroquad::prelude::*;
 use shared::{Player, PlayerInput, ServerFrame, channels};
 
+use alto_logger::TermLogger;
 use renet::{
     client::{ClientConnected, RequestConnection},
     endpoint::EndpointConfig,
@@ -66,7 +67,9 @@ impl App {
 
 #[macroquad::main("NaiaMacroquadExample")]
 async fn main() {
+    TermLogger::default().init().unwrap();
     rand::srand(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs());
+
     let id = rand::rand() as u64;
     let connection = get_connection("127.0.0.1:5000".to_string(), id).unwrap();
     let mut app = App::new(id, connection);
