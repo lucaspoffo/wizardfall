@@ -1,9 +1,9 @@
 use renet::channel::{
-    ChannelConfig, ReliableOrderedChannelConfig, UnreliableUnorderedChannel,
-    UnreliableUnorderedChannelConfig,
+    ChannelConfig, ReliableOrderedChannelConfig, UnreliableUnorderedChannelConfig,
 };
 use serde::{Deserialize, Serialize};
 
+use glam::vec2;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::{Duration, Instant};
@@ -24,17 +24,17 @@ pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
 pub struct Player {
     pub id: u64,
     pub color: (f32, f32, f32),
-    pub x: i16,
-    pub y: i16,
-    pub animation_manager: AnimationManager<PlayerAnimations>
+    pub x: f32,
+    pub y: f32,
+    pub animation_manager: AnimationManager<PlayerAnimations>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlayerState {
     pub id: u64,
     pub color: (f32, f32, f32),
-    pub x: i16,
-    pub y: i16,
+    pub x: f32,
+    pub y: f32,
     pub animation_state: AnimationState<PlayerAnimations>,
 }
 
@@ -42,10 +42,10 @@ impl Player {
     pub fn new(id: u64) -> Self {
         Self {
             id,
-            x: 100,
-            y: 100,
+            x: 100.0,
+            y: 100.0,
             color: (1.0, 0.0, 0.0),
-            animation_manager: AnimationManager::new()
+            animation_manager: AnimationManager::new(),
         }
     }
 
@@ -55,20 +55,38 @@ impl Player {
             x: state.x,
             y: state.y,
             color: state.color,
-            animation_manager: AnimationManager::from_state(&state.animation_state)
+            animation_manager: AnimationManager::from_state(&state.animation_state),
         }
     }
 
     pub fn update_from_input(&mut self, input: &PlayerInput) {
-        self.x += (input.right as i16 - input.left as i16) * 4;
-        self.y += (input.down as i16 - input.up as i16) * 4;
+        let x = (input.right as i8 - input.left as i8) as f32;
+        let y = (input.down as i8 - input.up as i8) as f32;
+        let mut direction = vec2(x, y);
+
+        if direction.length() != 0.0 {
+            direction = direction.normalize();
+            self.x += direction.x * 4.0;
+            self.y += direction.y * 4.0;
+        }
+
+        if input.right ^ input.left || input.down ^ input.up {
+            self.animation_manager.play(PlayerAnimations::Run);
+        } else {
+            self.animation_manager.play(PlayerAnimations::Idle);
+        }
+
+        if input.right ^ input.left {
+            self.animation_manager.h_flip = !input.right;
+        }
     }
 
     pub fn update_from_state(&mut self, state: &PlayerState) {
         self.x = state.x;
         self.y = state.y;
         self.color = state.color;
-        self.animation_manager.update_from_state(&state.animation_state);
+        self.animation_manager
+            .update_from_state(&state.animation_state);
     }
 
     pub fn state(&self) -> PlayerState {
@@ -77,7 +95,7 @@ impl Player {
             x: self.x,
             y: self.y,
             color: self.color,
-            animation_state: self.animation_manager.state()
+            animation_state: self.animation_manager.state(),
         }
     }
 }
@@ -119,6 +137,7 @@ pub struct AnimationController {
 pub struct AnimationState<T> {
     pub frame: u32,
     pub current_animation: T,
+    h_flip: bool,
 }
 
 impl AnimationController {
@@ -156,6 +175,7 @@ pub enum PlayerAnimations {
 #[derive(Debug)]
 pub struct AnimationManager<T> {
     pub current_animation: T,
+    pub h_flip: bool,
     animations: HashMap<T, AnimationController>,
 }
 
@@ -166,17 +186,22 @@ impl<T: Eq + Hash + Clone> AnimationManager<T> {
     }
 
     pub fn play(&mut self, animation: T) {
+        if self.current_animation == animation {
+            return;
+        }
+
         let current_animation = self.animations.get_mut(&self.current_animation).unwrap();
         current_animation.reset();
         self.current_animation = animation;
     }
 
     pub fn current_animation_controller(&self) -> &AnimationController {
-       self.animations.get(&self.current_animation).unwrap()
+        self.animations.get(&self.current_animation).unwrap()
     }
 
     pub fn update_from_state(&mut self, state: &AnimationState<T>) {
         self.current_animation = state.current_animation.clone();
+        self.h_flip = state.h_flip;
         let current_animation = self.animations.get_mut(&self.current_animation).unwrap();
         current_animation.frame = state.frame;
     }
@@ -185,7 +210,8 @@ impl<T: Eq + Hash + Clone> AnimationManager<T> {
         let animation = self.animations.get(&self.current_animation).unwrap();
         AnimationState {
             current_animation: self.current_animation.clone(),
-            frame: animation.frame
+            frame: animation.frame,
+            h_flip: self.h_flip,
         }
     }
 }
@@ -200,6 +226,7 @@ impl AnimationManager<PlayerAnimations> {
         Self {
             current_animation: PlayerAnimations::Idle,
             animations,
+            h_flip: false,
         }
     }
 
@@ -208,5 +235,4 @@ impl AnimationManager<PlayerAnimations> {
         animation_manager.update_from_state(state);
         animation_manager
     }
-
 }

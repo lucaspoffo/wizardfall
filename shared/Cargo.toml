@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 renet = { path = "../../renet" }
 serde = "1"
+glam = "0.12.0"

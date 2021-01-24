@@ -3,8 +3,7 @@ use async_once::AsyncOnce;
 use lazy_static::lazy_static;
 use macroquad::prelude::*;
 use shared::{
-    channels, AnimationController, AnimationManager, Player, PlayerAnimations, PlayerInput,
-    PlayerState, ServerFrame,
+    channels, AnimationManager, Player, PlayerAnimations, PlayerInput, PlayerState, ServerFrame,
 };
 
 use alto_logger::TermLogger;
@@ -65,14 +64,14 @@ impl TextureAnimation {
 
 struct PlayerClient {
     inner: Player,
-    animation_manager_client: AnimationManagerClient<PlayerAnimations>
+    animation_manager_client: AnimationManagerClient<PlayerAnimations>,
 }
 
 impl PlayerClient {
     pub async fn from_state(state: &PlayerState) -> Self {
         Self {
             inner: Player::from_state(state),
-            animation_manager_client: AnimationManagerClient::new().await
+            animation_manager_client: AnimationManagerClient::new().await,
         }
     }
 }
@@ -82,7 +81,7 @@ struct AnimationManagerClient<T> {
 }
 
 impl<T: Eq + Hash + Clone> AnimationManagerClient<T> {
-    pub fn draw(&self, x: f32, y: f32, animation_manager: &AnimationManager<T>) {
+    pub fn draw(&self, mut x: f32, y: f32, animation_manager: &AnimationManager<T>) {
         let texture_animation = self
             .animations_texture
             .get(&animation_manager.current_animation)
@@ -97,8 +96,16 @@ impl<T: Eq + Hash + Clone> AnimationManagerClient<T> {
             texture_animation.height as f32,
         );
 
+        println!("{:?}", draw_rect);
+
         let mut params = DrawTextureParams::default();
         params.source = Some(draw_rect);
+        let mut x_size = texture_animation.width as f32;
+        if animation_manager.h_flip {
+            x_size *= -1.0;
+            x += texture_animation.width as f32;
+        }
+        params.dest_size = Some(vec2(x_size, texture_animation.height as f32));
 
         draw_texture_ex(texture_animation.texture, x, y, WHITE, params)
     }
@@ -126,9 +133,22 @@ impl App {
             if let Some(player) = self.players.get_mut(&player_state.id) {
                 player.inner.update_from_state(&player_state);
             } else {
-                self.players
-                    .insert(player_state.id, PlayerClient::from_state(player_state).await);
+                self.players.insert(
+                    player_state.id,
+                    PlayerClient::from_state(player_state).await,
+                );
             }
+        }
+
+        let players_id: Vec<u64> = players_state.iter().map(|p| p.id).collect();
+        let removed_players: Vec<u64> = self
+            .players
+            .keys()
+            .filter(|player_id| !players_id.contains(player_id))
+            .map(|id| id.clone())
+            .collect();
+        for id in removed_players {
+            self.players.remove(&id);
         }
     }
 
@@ -156,9 +176,12 @@ impl App {
             self.update_players(server_frame.players).await;
         }
 
-        const SIZE: f32 = 32.0;
         for player in self.players.values() {
-            player.animation_manager_client.draw(player.inner.x as f32, player.inner.y as f32, &player.inner.animation_manager);
+            player.animation_manager_client.draw(
+                player.inner.x,
+                player.inner.y,
+                &player.inner.animation_manager,
+            );
         }
     }
 }
@@ -207,67 +230,5 @@ fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
             return Ok(connection);
         };
         sleep(Duration::from_millis(20));
-    }
-}
-
-struct Animation {
-    texture: Texture2D,
-    h_frames: u32,
-    v_frames: u32,
-    height: u32,
-    width: u32,
-    frame: u32,
-    speed: Duration,
-    last_updated: Instant,
-    total_frames: u32,
-}
-
-impl Animation {
-    pub fn new(
-        texture: Texture2D,
-        h_frames: u32,
-        v_frames: u32,
-        width: u32,
-        height: u32,
-        fps: u64,
-    ) -> Self {
-        let speed = Duration::from_millis(1000 / fps);
-        Self {
-            texture,
-            h_frames,
-            v_frames,
-            height,
-            width,
-            speed,
-            frame: 0,
-            last_updated: Instant::now(),
-            total_frames: h_frames * v_frames,
-        }
-    }
-
-    pub fn update(&mut self) {
-        let current_time = Instant::now();
-        if current_time - self.last_updated > self.speed {
-            self.frame += 1;
-            self.frame = self.frame % self.total_frames;
-            self.last_updated = current_time;
-        }
-    }
-
-    pub fn draw(&self, x: f32, y: f32) {
-        let texture_x = self.frame % self.h_frames * self.width;
-        let texture_y = self.frame / self.h_frames * self.height;
-        let draw_rect = Rect::new(
-            texture_x as f32,
-            texture_y as f32,
-            self.width as f32,
-            self.height as f32,
-        );
-
-        let mut params = DrawTextureParams::default();
-        params.source = Some(draw_rect);
-        println!("frame: {}\n{:?}", self.frame, params.source);
-
-        draw_texture_ex(self.texture, x, y, WHITE, params)
     }
 }
