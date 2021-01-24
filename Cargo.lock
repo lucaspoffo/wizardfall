@@ -23,6 +23,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_once"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58f8f7a882f8fffee0bdbb0580033b01613b50781e03c02713da0599ed90b595"
+
+[[package]]
 name = "autocfg"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -73,7 +79,9 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "alto_logger",
+ "async_once",
  "bincode",
+ "lazy_static",
  "log",
  "macroquad",
  "renet",
@@ -98,6 +106,12 @@ dependencies = [
  "adler32",
  "byteorder",
 ]
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee2626afccd7561a06cf1367e2950c4718ea04565e20fb5029b6c7d8ad09abcf"
 
 [[package]]
 name = "fontdue"
@@ -149,6 +163,12 @@ checksum = "1cdb29978cc5797bd8dcc8e5bf7de604891df2a8dc576973d71a281e916db2ff"
 dependencies = [
  "adler32",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
@@ -296,6 +316,7 @@ dependencies = [
  "alto_logger",
  "bincode",
  "byteorder",
+ "dyn-clone",
  "log",
  "serde",
 ]

@@ -35,7 +35,8 @@ impl ServerState {
     fn update_players(&mut self) {
         for player in self.players.iter_mut() {
             if let Some(input) = self.players_input.get(&player.id) {
-                player.update_from_input(&input)
+                player.update_from_input(&input);
+                player.animation_manager.update();
             }
         }
     }
@@ -68,11 +69,11 @@ fn server(ip: String) -> Result<(), RenetError> {
         server_state.update_players();
 
         let server_frame = ServerFrame {
-            players: server_state.players.clone(),
+            players: server_state.players.iter().map(|p| p.state()).collect(),
         };
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
 
-        server.send_message_to_all_clients(0, server_frame.into_boxed_slice());
+        server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
         server.send_packets();
 
         while let Some(event) = server.get_event() {
