@@ -246,6 +246,7 @@ pub struct CastTarget {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PlayerAction {
     CastFireball(CastTarget),
+    CastTeleport(CastTarget),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

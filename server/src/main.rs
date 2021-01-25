@@ -53,9 +53,6 @@ impl ServerState {
                 .duration
                 .checked_sub(Duration::from_micros(16666))
                 .unwrap_or(Duration::from_micros(0));
-
-            println!("{:?}", projectile);
-            dbg!(!(projectile.duration.as_nanos() == 0));
         }
 
         self.projectiles.retain(|p| {
@@ -107,6 +104,12 @@ fn server(ip: String) -> Result<(), RenetError> {
                             server_state.projectiles.push(projectile);
                         }
                     }
+                    PlayerAction::CastTeleport(cast_target) => {
+                        if let Some(player) = server_state.players.get_mut(&client_id) {
+                            player.x = cast_target.x;
+                            player.y = cast_target.y;
+                        }
+                    }
                 }
             }
         }
@@ -121,7 +124,7 @@ fn server(ip: String) -> Result<(), RenetError> {
 
         // println!("{:?}", server_frame);
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
-        // println!("Server Frame Size: {} bytes", server_frame.len());
+        println!("Server Frame Size: {} bytes", server_frame.len());
 
         server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
         server.send_packets();

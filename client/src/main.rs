@@ -190,7 +190,7 @@ impl App {
             right,
         };
 
-        if is_mouse_button_down(MouseButton::Left) {
+        if is_mouse_button_pressed(MouseButton::Left) {
             let mouse_pos = mouse_position();
             let cast_target = CastTarget {
                 x: mouse_pos.0,
@@ -199,6 +199,18 @@ impl App {
             let cast_fireball = PlayerAction::CastFireball(cast_target);
 
             let message = bincode::serialize(&cast_fireball).expect("Failed to serialize message.");
+            self.connection.send_message(2, message.into_boxed_slice());
+        }
+
+        if is_key_pressed(KeyCode::Space) {
+            let mouse_pos = mouse_position();
+            let cast_target = CastTarget {
+                x: mouse_pos.0 - 16.0 ,
+                y: mouse_pos.1 - 24.0,
+            };
+            let cast_teleport = PlayerAction::CastTeleport(cast_target);
+
+            let message = bincode::serialize(&cast_teleport).expect("Failed to serialize message.");
             self.connection.send_message(2, message.into_boxed_slice());
         }
 
