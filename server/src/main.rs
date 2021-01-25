@@ -24,11 +24,11 @@ fn main() -> Result<(), RenetError> {
 
 struct ServerState {
     players: Vec<Player>,
-    players_input: HashMap<u64, PlayerInput>,
+    players_input: HashMap<u32, PlayerInput>,
 }
 
 impl ServerState {
-    fn set_player_input(&mut self, id: u64, input: PlayerInput) {
+    fn set_player_input(&mut self, id: u32, input: PlayerInput) {
         self.players_input.insert(id, input);
     }
 
@@ -62,7 +62,7 @@ fn server(ip: String) -> Result<(), RenetError> {
         for (client_id, messages) in server.get_messages_from_channel(0).iter() {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
-                server_state.set_player_input(*client_id, input);
+                server_state.set_player_input(*client_id as u32, input);
             }
         }
 
@@ -71,7 +71,10 @@ fn server(ip: String) -> Result<(), RenetError> {
         let server_frame = ServerFrame {
             players: server_state.players.iter().map(|p| p.state()).collect(),
         };
+
+        println!("{:?}", server_frame);
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
+        println!("Server Frame Size: {} bytes", server_frame.len());
 
         server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
         server.send_packets();
@@ -79,13 +82,13 @@ fn server(ip: String) -> Result<(), RenetError> {
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected(id) => {
-                    let player = Player::new(id);
+                    let player = Player::new(id as u32);
                     server_state.players.push(player);
                 }
                 ServerEvent::ClientDisconnected(id) => {
-                    if let Some(pos) = server_state.players.iter().position(|p| p.id == id) {
+                    if let Some(pos) = server_state.players.iter().position(|p| p.id as u64 == id) {
                         server_state.players.remove(pos);
-                        server_state.players_input.remove(&id);
+                        server_state.players_input.remove(&(id as u32));
                     }
                 }
             }

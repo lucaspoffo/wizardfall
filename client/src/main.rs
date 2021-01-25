@@ -21,8 +21,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct App {
-    id: u64,
-    players: HashMap<u64, PlayerClient>,
+    id: u32,
+    players: HashMap<u32, PlayerClient>,
     connection: ClientConnected,
 }
 
@@ -96,8 +96,6 @@ impl<T: Eq + Hash + Clone> AnimationManagerClient<T> {
             texture_animation.height as f32,
         );
 
-        println!("{:?}", draw_rect);
-
         let mut params = DrawTextureParams::default();
         params.source = Some(draw_rect);
         let mut x_size = texture_animation.width as f32;
@@ -120,7 +118,7 @@ impl AnimationManagerClient<PlayerAnimations> {
 }
 
 impl App {
-    fn new(id: u64, connection: ClientConnected) -> Self {
+    fn new(id: u32, connection: ClientConnected) -> Self {
         Self {
             id,
             connection,
@@ -140,8 +138,8 @@ impl App {
             }
         }
 
-        let players_id: Vec<u64> = players_state.iter().map(|p| p.id).collect();
-        let removed_players: Vec<u64> = self
+        let players_id: Vec<u32> = players_state.iter().map(|p| p.id).collect();
+        let removed_players: Vec<u32> = self
             .players
             .keys()
             .filter(|player_id| !players_id.contains(player_id))
@@ -170,6 +168,10 @@ impl App {
         self.connection.send_packets().unwrap();
 
         self.connection.process_events(Instant::now()).unwrap();
+
+        let network_info = self.connection.network_info();
+        println!("{:?}", network_info);
+
         for payload in self.connection.receive_all_messages_from_channel(1).iter() {
             let server_frame: ServerFrame =
                 bincode::deserialize(payload).expect("Failed to deserialize state.");
@@ -196,8 +198,8 @@ async fn main() {
             .as_secs(),
     );
 
-    let id = rand::rand() as u64;
-    let connection = get_connection("127.0.0.1:5000".to_string(), id).unwrap();
+    let id = rand::rand() as u32;
+    let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
     let mut app = App::new(id, connection);
 
     loop {
@@ -213,7 +215,7 @@ fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
     let socket = UdpSocket::bind("127.0.0.1:0")?;
     let endpoint_config = EndpointConfig::default();
 
-    println!("Id: {}", id);
+    println!("Client ID: {}", id);
 
     let mut request_connection = RequestConnection::new(
         id,
@@ -225,7 +227,7 @@ fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
     )?;
 
     loop {
-        println!("connectiong");
+        println!("Connecting with server.");
         if let Some(connection) = request_connection.update()? {
             return Ok(connection);
         };

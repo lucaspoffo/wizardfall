@@ -22,8 +22,7 @@ pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
 
 #[derive(Debug)]
 pub struct Player {
-    pub id: u64,
-    pub color: (f32, f32, f32),
+    pub id: u32,
     pub x: f32,
     pub y: f32,
     pub animation_manager: AnimationManager<PlayerAnimations>,
@@ -31,20 +30,18 @@ pub struct Player {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlayerState {
-    pub id: u64,
-    pub color: (f32, f32, f32),
+    pub id: u32,
     pub x: f32,
     pub y: f32,
     pub animation_state: AnimationState<PlayerAnimations>,
 }
 
 impl Player {
-    pub fn new(id: u64) -> Self {
+    pub fn new(id: u32) -> Self {
         Self {
             id,
             x: 100.0,
             y: 100.0,
-            color: (1.0, 0.0, 0.0),
             animation_manager: AnimationManager::new(),
         }
     }
@@ -54,7 +51,6 @@ impl Player {
             id: state.id,
             x: state.x,
             y: state.y,
-            color: state.color,
             animation_manager: AnimationManager::from_state(&state.animation_state),
         }
     }
@@ -84,7 +80,6 @@ impl Player {
     pub fn update_from_state(&mut self, state: &PlayerState) {
         self.x = state.x;
         self.y = state.y;
-        self.color = state.color;
         self.animation_manager
             .update_from_state(&state.animation_state);
     }
@@ -94,7 +89,6 @@ impl Player {
             id: self.id,
             x: self.x,
             y: self.y,
-            color: self.color,
             animation_state: self.animation_manager.state(),
         }
     }
