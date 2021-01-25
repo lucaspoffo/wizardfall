@@ -4,7 +4,6 @@ use shared::{
 
 use alto_logger::TermLogger;
 use bincode::{deserialize, serialize};
-use glam::vec2;
 use renet::{
     endpoint::EndpointConfig,
     error::RenetError,
@@ -47,8 +46,8 @@ impl ServerState {
 
     fn update_projectiles(&mut self) {
         for projectile in self.projectiles.iter_mut() {
-            projectile.x += projectile.direction.x * 4.0;
-            projectile.y += projectile.direction.y * 4.0;
+            projectile.position.x += projectile.direction.x * 4.0;
+            projectile.position.y += projectile.direction.y * 4.0;
             projectile.duration = projectile
                 .duration
                 .checked_sub(Duration::from_micros(16666))
@@ -94,20 +93,19 @@ fn server(ip: String) -> Result<(), RenetError> {
                 match player_action {
                     PlayerAction::CastFireball(cast_target) => {
                         if let Some(player) = server_state.players.get(&client_id) {
-                            let origin = vec2(player.x, player.y);
                             let projectile = Projectile::from_cast_target(
                                 ProjectileType::Fireball,
                                 client_id,
                                 cast_target,
-                                origin,
+                                player.position,
                             );
                             server_state.projectiles.push(projectile);
                         }
                     }
                     PlayerAction::CastTeleport(cast_target) => {
                         if let Some(player) = server_state.players.get_mut(&client_id) {
-                            player.x = cast_target.x;
-                            player.y = cast_target.y;
+                            player.position.x = cast_target.position.x;
+                            player.position.y = cast_target.position.y;
                         }
                     }
                 }

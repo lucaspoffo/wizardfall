@@ -191,10 +191,8 @@ impl App {
         };
 
         if is_mouse_button_pressed(MouseButton::Left) {
-            let mouse_pos = mouse_position();
             let cast_target = CastTarget {
-                x: mouse_pos.0,
-                y: mouse_pos.1,
+                position: mouse_position().into(),
             };
             let cast_fireball = PlayerAction::CastFireball(cast_target);
 
@@ -203,10 +201,8 @@ impl App {
         }
 
         if is_key_pressed(KeyCode::Space) {
-            let mouse_pos = mouse_position();
             let cast_target = CastTarget {
-                x: mouse_pos.0 - 16.0 ,
-                y: mouse_pos.1 - 24.0,
+                position: mouse_position().into()
             };
             let cast_teleport = PlayerAction::CastTeleport(cast_target);
 
@@ -232,14 +228,14 @@ impl App {
 
         for player in self.players.values() {
             player.animation_manager_client.draw(
-                player.inner.x,
-                player.inner.y,
+                player.inner.position.x,
+                player.inner.position.y,
                 &player.inner.animation_manager,
             );
         }
 
         for projectile in self.projectiles.values() {
-            draw_rectangle(projectile.x, projectile.y, 16.0, 16.0, RED);
+            draw_rectangle(projectile.position.x, projectile.position.y, 16.0, 16.0, RED);
         }
     }
 }

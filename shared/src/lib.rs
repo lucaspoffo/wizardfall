@@ -28,16 +28,14 @@ pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
 #[derive(Debug)]
 pub struct Player {
     pub id: u32,
-    pub x: f32,
-    pub y: f32,
+    pub position: Vec2,
     pub animation_manager: AnimationManager<PlayerAnimations>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlayerState {
     pub id: u32,
-    pub x: f32,
-    pub y: f32,
+    pub position: Vec2,
     pub animation_state: AnimationState<PlayerAnimations>,
 }
 
@@ -45,8 +43,7 @@ impl Player {
     pub fn new(id: u32) -> Self {
         Self {
             id,
-            x: 100.0,
-            y: 100.0,
+            position: vec2(100.0, 100.0),
             animation_manager: AnimationManager::new(),
         }
     }
@@ -54,8 +51,7 @@ impl Player {
     pub fn from_state(state: &PlayerState) -> Self {
         Self {
             id: state.id,
-            x: state.x,
-            y: state.y,
+            position: state.position,
             animation_manager: AnimationManager::from_state(&state.animation_state),
         }
     }
@@ -67,8 +63,8 @@ impl Player {
 
         if direction.length() != 0.0 {
             direction = direction.normalize();
-            self.x += direction.x * 4.0;
-            self.y += direction.y * 4.0;
+            self.position.x += direction.x * 4.0;
+            self.position.y += direction.y * 4.0;
         }
 
         if input.right ^ input.left || input.down ^ input.up {
@@ -83,8 +79,8 @@ impl Player {
     }
 
     pub fn update_from_state(&mut self, state: &PlayerState) {
-        self.x = state.x;
-        self.y = state.y;
+        self.position.x = state.position.x;
+        self.position.y = state.position.y;
         self.animation_manager
             .update_from_state(&state.animation_state);
     }
@@ -92,8 +88,7 @@ impl Player {
     pub fn state(&self) -> PlayerState {
         PlayerState {
             id: self.id,
-            x: self.x,
-            y: self.y,
+            position: self.position,
             animation_state: self.animation_manager.state(),
         }
     }
@@ -239,8 +234,7 @@ impl AnimationManager<PlayerAnimations> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CastTarget {
-    pub x: f32,
-    pub y: f32,
+    pub position: Vec2
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -260,8 +254,7 @@ pub struct Projectile {
     id: u32,
     projectile_type: ProjectileType,
     owner: u32,
-    pub x: f32,
-    pub y: f32,
+    pub position: Vec2,
     pub direction: Vec2,
     pub rotation: f32,
     pub duration: Duration,
@@ -277,16 +270,14 @@ impl Projectile {
         origin: Vec2,
     ) -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-        let target = vec2(cast_target.x, cast_target.y);
-        let direction = (target - origin).normalize();
+        let direction = (cast_target.position - origin).normalize();
         let rotation = direction.angle_between(Vec2::unit_x());
         Self {
             id,
             rotation,
             projectile_type,
             owner,
-            x: origin.x,
-            y: origin.y,
+            position: origin,
             direction,
             duration: Duration::from_secs(2),
         }
@@ -297,8 +288,7 @@ impl Projectile {
             id: state.id,
             rotation: state.rotation,
             projectile_type: state.projectile_type.clone(),
-            x: state.x,
-            y: state.y,
+            position: state.position,
             owner: state.owner,
             direction: Vec2::unit_x(),
             duration: Duration::from_secs(0),
@@ -310,15 +300,14 @@ impl Projectile {
             id: self.id,
             projectile_type: self.projectile_type.clone(),
             owner: self.owner,
-            x: self.x,
-            y: self.y,
+            position: self.position,
             rotation: self.direction.angle_between(Vec2::unit_x()),
         }
     }
 
     pub fn update_from_state(&mut self, state: &ProjectileState) {
-        self.x = state.x;
-        self.y = state.y;
+        self.position.x = state.position.x;
+        self.position.y = state.position.y;
         self.rotation = state.rotation;
     }
 }
@@ -328,7 +317,6 @@ pub struct ProjectileState {
     pub id: u32,
     projectile_type: ProjectileType,
     owner: u32,
-    x: f32,
-    y: f32,
+    position: Vec2,
     rotation: f32,
 }
