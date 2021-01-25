@@ -1,22 +1,27 @@
+use glam::{vec2, Vec2};
 use renet::channel::{
     ChannelConfig, ReliableOrderedChannelConfig, UnreliableUnorderedChannelConfig,
 };
 use serde::{Deserialize, Serialize};
 
-use glam::vec2;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
     let mut reliable_config = ReliableOrderedChannelConfig::default();
     reliable_config.message_resend_time = Duration::from_millis(100);
 
+    let mut player_action_channel = ReliableOrderedChannelConfig::default();
+    player_action_channel.message_resend_time = Duration::from_millis(0);
+
     let unreliable_config = UnreliableUnorderedChannelConfig::default();
 
     let mut channels_config: HashMap<u8, Box<dyn ChannelConfig>> = HashMap::new();
     channels_config.insert(0, Box::new(reliable_config));
     channels_config.insert(1, Box::new(unreliable_config));
+    channels_config.insert(2, Box::new(player_action_channel));
     channels_config
 }
 
@@ -105,6 +110,7 @@ pub struct PlayerInput {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerFrame {
     pub players: Vec<PlayerState>,
+    pub projectiles: Vec<ProjectileState>,
 }
 
 pub enum Messages {
@@ -229,4 +235,99 @@ impl AnimationManager<PlayerAnimations> {
         animation_manager.update_from_state(state);
         animation_manager
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CastTarget {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum PlayerAction {
+    CastFireball(CastTarget),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProjectileType {
+    Fireball,
+
+}
+
+#[derive(Debug)]
+pub struct Projectile {
+    id: u32,
+    projectile_type: ProjectileType,
+    owner: u32,
+    pub x: f32,
+    pub y: f32,
+    pub direction: Vec2,
+    pub rotation: f32,
+    pub duration: Duration,
+}
+
+static NEXT_ID: AtomicU32 = AtomicU32::new(0);
+
+impl Projectile {
+    pub fn from_cast_target(
+        projectile_type: ProjectileType,
+        owner: u32,
+        cast_target: CastTarget,
+        origin: Vec2,
+    ) -> Self {
+        let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+        let target = vec2(cast_target.x, cast_target.y);
+        let direction = (target - origin).normalize();
+        let rotation = direction.angle_between(Vec2::unit_x());
+        Self {
+            id,
+            rotation,
+            projectile_type,
+            owner,
+            x: origin.x,
+            y: origin.y,
+            direction,
+            duration: Duration::from_secs(2),
+        }
+    }
+
+    pub fn from_state(state: &ProjectileState) -> Self {
+        Self {
+            id: state.id,
+            rotation: state.rotation,
+            projectile_type: state.projectile_type.clone(),
+            x: state.x,
+            y: state.y,
+            owner: state.owner,
+            direction: Vec2::unit_x(),
+            duration: Duration::from_secs(0),
+        }
+    }
+
+    pub fn state(&self) -> ProjectileState {
+        ProjectileState {
+            id: self.id,
+            projectile_type: self.projectile_type.clone(),
+            owner: self.owner,
+            x: self.x,
+            y: self.y,
+            rotation: self.direction.angle_between(Vec2::unit_x()),
+        }
+    }
+
+    pub fn update_from_state(&mut self, state: &ProjectileState) {
+        self.x = state.x;
+        self.y = state.y;
+        self.rotation = state.rotation;
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProjectileState {
+    pub id: u32,
+    projectile_type: ProjectileType,
+    owner: u32,
+    x: f32,
+    y: f32,
+    rotation: f32,
 }

@@ -3,7 +3,8 @@ use async_once::AsyncOnce;
 use lazy_static::lazy_static;
 use macroquad::prelude::*;
 use shared::{
-    channels, AnimationManager, Player, PlayerAnimations, PlayerInput, PlayerState, ServerFrame,
+    channels, AnimationManager, CastTarget, Player, PlayerAction, PlayerAnimations, PlayerInput,
+    PlayerState, Projectile, ServerFrame, ProjectileState
 };
 
 use alto_logger::TermLogger;
@@ -23,6 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 struct App {
     id: u32,
     players: HashMap<u32, PlayerClient>,
+    projectiles: HashMap<u32, Projectile>,
     connection: ClientConnected,
 }
 
@@ -123,6 +125,7 @@ impl App {
             id,
             connection,
             players: HashMap::new(),
+            projectiles: HashMap::new(),
         }
     }
 
@@ -150,6 +153,30 @@ impl App {
         }
     }
 
+    fn update_projectiles(&mut self, projectiles_state: Vec<ProjectileState>) {
+        for projectile_state in projectiles_state.iter() {
+            if let Some(projectile) = self.projectiles.get_mut(&projectile_state.id) {
+                projectile.update_from_state(projectile_state);
+            } else {
+                self.projectiles.insert(
+                    projectile_state.id,
+                    Projectile::from_state(projectile_state),
+                );
+            }
+        }
+
+        let projectiles_id: Vec<u32> = projectiles_state.iter().map(|p| p.id).collect();
+        let removed_projectiles: Vec<u32> = self
+            .projectiles
+            .keys()
+            .filter(|player_id| !projectiles_id.contains(player_id))
+            .map(|id| id.clone())
+            .collect();
+        for id in removed_projectiles {
+            self.projectiles.remove(&id);
+        }
+    }
+
     async fn update(&mut self) {
         let up = is_key_down(KeyCode::W) || is_key_down(KeyCode::Up);
         let down = is_key_down(KeyCode::S) || is_key_down(KeyCode::Down);
@@ -162,6 +189,18 @@ impl App {
             left,
             right,
         };
+
+        if is_mouse_button_down(MouseButton::Left) {
+            let mouse_pos = mouse_position();
+            let cast_target = CastTarget {
+                x: mouse_pos.0,
+                y: mouse_pos.1,
+            };
+            let cast_fireball = PlayerAction::CastFireball(cast_target);
+
+            let message = bincode::serialize(&cast_fireball).expect("Failed to serialize message.");
+            self.connection.send_message(2, message.into_boxed_slice());
+        }
 
         let message = bincode::serialize(&input).expect("Failed to serialize message.");
         self.connection.send_message(0, message.into_boxed_slice());
@@ -176,6 +215,7 @@ impl App {
             let server_frame: ServerFrame =
                 bincode::deserialize(payload).expect("Failed to deserialize state.");
             self.update_players(server_frame.players).await;
+            self.update_projectiles(server_frame.projectiles);
         }
 
         for player in self.players.values() {
@@ -184,6 +224,10 @@ impl App {
                 player.inner.y,
                 &player.inner.animation_manager,
             );
+        }
+
+        for projectile in self.projectiles.values() {
+            draw_rectangle(projectile.x, projectile.y, 16.0, 16.0, RED);
         }
     }
 }

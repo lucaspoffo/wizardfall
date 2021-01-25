@@ -1,7 +1,10 @@
-use shared::{channels, Player, PlayerInput, ServerFrame};
+use shared::{
+    channels, Player, PlayerAction, PlayerInput, Projectile, ProjectileType, ServerFrame,
+};
 
 use alto_logger::TermLogger;
 use bincode::{deserialize, serialize};
+use glam::vec2;
 use renet::{
     endpoint::EndpointConfig,
     error::RenetError,
@@ -23,8 +26,9 @@ fn main() -> Result<(), RenetError> {
 }
 
 struct ServerState {
-    players: Vec<Player>,
+    players: HashMap<u32, Player>,
     players_input: HashMap<u32, PlayerInput>,
+    projectiles: Vec<Projectile>,
 }
 
 impl ServerState {
@@ -33,12 +37,30 @@ impl ServerState {
     }
 
     fn update_players(&mut self) {
-        for player in self.players.iter_mut() {
+        for player in self.players.values_mut() {
             if let Some(input) = self.players_input.get(&player.id) {
                 player.update_from_input(&input);
                 player.animation_manager.update();
             }
         }
+    }
+
+    fn update_projectiles(&mut self) {
+        for projectile in self.projectiles.iter_mut() {
+            projectile.x += projectile.direction.x * 4.0;
+            projectile.y += projectile.direction.y * 4.0;
+            projectile.duration = projectile
+                .duration
+                .checked_sub(Duration::from_micros(16666))
+                .unwrap_or(Duration::from_micros(0));
+
+            println!("{:?}", projectile);
+            dbg!(!(projectile.duration.as_nanos() == 0));
+        }
+
+        self.projectiles.retain(|p| {
+            !(p.duration.as_nanos() == 0)
+        });
     }
 }
 
@@ -51,7 +73,8 @@ fn server(ip: String) -> Result<(), RenetError> {
         Server::new(socket, server_config, endpoint_config, channels())?;
 
     let mut server_state = ServerState {
-        players: vec![],
+        projectiles: vec![],
+        players: HashMap::new(),
         players_input: HashMap::new(),
     };
 
@@ -66,15 +89,39 @@ fn server(ip: String) -> Result<(), RenetError> {
             }
         }
 
+        for (client_id, messages) in server.get_messages_from_channel(2).iter() {
+            for message in messages.iter() {
+                let player_action: PlayerAction =
+                    deserialize(message).expect("Failed to deserialize.");
+                let client_id = *client_id as u32;
+                match player_action {
+                    PlayerAction::CastFireball(cast_target) => {
+                        if let Some(player) = server_state.players.get(&client_id) {
+                            let origin = vec2(player.x, player.y);
+                            let projectile = Projectile::from_cast_target(
+                                ProjectileType::Fireball,
+                                client_id,
+                                cast_target,
+                                origin,
+                            );
+                            server_state.projectiles.push(projectile);
+                        }
+                    }
+                }
+            }
+        }
+
         server_state.update_players();
+        server_state.update_projectiles();
 
         let server_frame = ServerFrame {
-            players: server_state.players.iter().map(|p| p.state()).collect(),
+            players: server_state.players.values().map(|p| p.state()).collect(),
+            projectiles: server_state.projectiles.iter().map(|p| p.state()).collect(),
         };
 
-        println!("{:?}", server_frame);
+        // println!("{:?}", server_frame);
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
-        println!("Server Frame Size: {} bytes", server_frame.len());
+        // println!("Server Frame Size: {} bytes", server_frame.len());
 
         server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
         server.send_packets();
@@ -83,12 +130,12 @@ fn server(ip: String) -> Result<(), RenetError> {
             match event {
                 ServerEvent::ClientConnected(id) => {
                     let player = Player::new(id as u32);
-                    server_state.players.push(player);
+                    server_state.players.insert(player.id, player);
                 }
                 ServerEvent::ClientDisconnected(id) => {
-                    if let Some(pos) = server_state.players.iter().position(|p| p.id as u64 == id) {
-                        server_state.players.remove(pos);
-                        server_state.players_input.remove(&(id as u32));
+                    let id = id as u32;
+                    if let Some(_) = server_state.players.remove(&id) {
+                        server_state.players_input.remove(&id);
                     }
                 }
             }
