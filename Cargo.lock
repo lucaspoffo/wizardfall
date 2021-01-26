@@ -29,12 +29,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async_once"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58f8f7a882f8fffee0bdbb0580033b01613b50781e03c02713da0599ed90b595"
-
-[[package]]
 name = "autocfg"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -85,9 +79,7 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "alto_logger",
- "async_once",
  "bincode",
- "lazy_static",
  "log",
  "macroquad",
  "renet",

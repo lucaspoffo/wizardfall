@@ -1,10 +1,8 @@
 // use shared::channels;
-use async_once::AsyncOnce;
-use lazy_static::lazy_static;
 use macroquad::prelude::*;
 use shared::{
-    channels, AnimationManager, CastTarget, Player, PlayerAction, PlayerAnimations, PlayerInput,
-    PlayerState, Projectile, ProjectileState, ServerFrame, NetworkState, NetworkId
+    channels, CastTarget, NetworkId, NetworkState, Player, PlayerAction, PlayerAnimations,
+    PlayerInput, Projectile, ServerFrame,
 };
 
 use alto_logger::TermLogger;
@@ -17,9 +15,7 @@ use renet::{
 use shipyard::*;
 
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::net::UdpSocket;
-use std::rc::Rc;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -102,7 +98,7 @@ impl App {
 
         if is_key_pressed(KeyCode::Space) {
             let mut cast_target = CastTarget {
-                position: mouse_position().into()
+                position: mouse_position().into(),
             };
             cast_target.position = cast_target.position - vec2(16.0, 24.0);
             let cast_teleport = PlayerAction::CastTeleport(cast_target);
@@ -126,15 +122,19 @@ impl App {
             let server_frame: ServerFrame =
                 bincode::deserialize(payload).expect("Failed to deserialize state.");
 
-            self.world.run_with_data(
-                update_network_state::<Player>,
-                (&server_frame.players, &mut self.entity_mapping),
-            ).unwrap();
+            self.world
+                .run_with_data(
+                    update_network_state::<Player>,
+                    (&server_frame.players, &mut self.entity_mapping),
+                )
+                .unwrap();
 
-            self.world.run_with_data(
-                update_network_state::<Projectile>,
-                (&server_frame.projectiles, &mut self.entity_mapping),
-            ).unwrap();
+            self.world
+                .run_with_data(
+                    update_network_state::<Projectile>,
+                    (&server_frame.projectiles, &mut self.entity_mapping),
+                )
+                .unwrap();
         }
 
         // println!("{:?}", self.world);
