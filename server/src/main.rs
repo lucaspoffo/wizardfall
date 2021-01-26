@@ -1,5 +1,6 @@
 use shared::{
-    channels, Player, PlayerAction, PlayerInput, Projectile, ProjectileType, ServerFrame,
+    channels, Player, PlayerAction, PlayerInput, PlayerState, Projectile, ProjectileState,
+    ProjectileType, ServerFrame,
 };
 
 use alto_logger::TermLogger;
@@ -10,6 +11,8 @@ use renet::{
     protocol::unsecure::UnsecureServerProtocol,
     server::{Server, ServerConfig, ServerEvent},
 };
+
+use shipyard::*;
 
 use std::collections::HashMap;
 use std::net::UdpSocket;
@@ -25,39 +28,7 @@ fn main() -> Result<(), RenetError> {
 }
 
 struct ServerState {
-    players: HashMap<u32, Player>,
-    players_input: HashMap<u32, PlayerInput>,
-    projectiles: Vec<Projectile>,
-}
-
-impl ServerState {
-    fn set_player_input(&mut self, id: u32, input: PlayerInput) {
-        self.players_input.insert(id, input);
-    }
-
-    fn update_players(&mut self) {
-        for player in self.players.values_mut() {
-            if let Some(input) = self.players_input.get(&player.id) {
-                player.update_from_input(&input);
-                player.animation_manager.update();
-            }
-        }
-    }
-
-    fn update_projectiles(&mut self) {
-        for projectile in self.projectiles.iter_mut() {
-            projectile.position.x += projectile.direction.x * 4.0;
-            projectile.position.y += projectile.direction.y * 4.0;
-            projectile.duration = projectile
-                .duration
-                .checked_sub(Duration::from_micros(16666))
-                .unwrap_or(Duration::from_micros(0));
-        }
-
-        self.projectiles.retain(|p| {
-            !(p.duration.as_nanos() == 0)
-        });
-    }
+    player_mapping: HashMap<u64, EntityId>,
 }
 
 fn server(ip: String) -> Result<(), RenetError> {
@@ -69,10 +40,10 @@ fn server(ip: String) -> Result<(), RenetError> {
         Server::new(socket, server_config, endpoint_config, channels())?;
 
     let mut server_state = ServerState {
-        projectiles: vec![],
-        players: HashMap::new(),
-        players_input: HashMap::new(),
+        player_mapping: HashMap::new(),
     };
+
+    let world = World::new();
 
     loop {
         let start = Instant::now();
@@ -81,7 +52,11 @@ fn server(ip: String) -> Result<(), RenetError> {
         for (client_id, messages) in server.get_messages_from_channel(0).iter() {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
-                server_state.set_player_input(*client_id as u32, input);
+                if let Some(player_entity_id) = server_state.player_mapping.get(client_id) {
+                    world.run(|entities: EntitiesView, mut inputs: ViewMut<PlayerInput>| {
+                        entities.add_component(&mut inputs, input, *player_entity_id);
+                    });
+                }
             }
         }
 
@@ -89,38 +64,39 @@ fn server(ip: String) -> Result<(), RenetError> {
             for message in messages.iter() {
                 let player_action: PlayerAction =
                     deserialize(message).expect("Failed to deserialize.");
-                let client_id = *client_id as u32;
                 match player_action {
                     PlayerAction::CastFireball(cast_target) => {
-                        if let Some(player) = server_state.players.get(&client_id) {
-                            let projectile = Projectile::from_cast_target(
-                                ProjectileType::Fireball,
-                                client_id,
-                                cast_target,
-                                player.position,
-                            );
-                            server_state.projectiles.push(projectile);
+                        if let Some(player_entity_id) = server_state.player_mapping.get(&client_id) {
+                            world.run(|mut entities: EntitiesViewMut, mut players: View<Player>, mut projectiles: ViewMut<Projectile>| {
+                                let player = (&mut players).get(*player_entity_id);
+                                let projectile = Projectile::from_cast_target(
+                                    ProjectileType::Fireball,
+                                    *client_id as u32,
+                                    cast_target,
+                                    player.position,
+                                );
+                                entities.add_entity(&mut projectiles, projectile);
+                            });
                         }
                     }
                     PlayerAction::CastTeleport(cast_target) => {
-                        if let Some(player) = server_state.players.get_mut(&client_id) {
-                            player.position.x = cast_target.position.x;
-                            player.position.y = cast_target.position.y;
+                        if let Some(entity_id) = server_state.player_mapping.get(&client_id) {
+                            world.run(|mut players: ViewMut<Player>| {
+                                let player = (&mut players).get(*entity_id);
+                                player.position.x = cast_target.position.x;
+                                player.position.y = cast_target.position.y;
+                            });
                         }
                     }
                 }
             }
         }
 
-        server_state.update_players();
-        server_state.update_projectiles();
+        world.run(update_players);
+        world.run(update_projectiles);
 
-        let server_frame = ServerFrame {
-            players: server_state.players.values().map(|p| p.state()).collect(),
-            projectiles: server_state.projectiles.iter().map(|p| p.state()).collect(),
-        };
+        let server_frame = world.run(world_server_frame);
 
-        // println!("{:?}", server_frame);
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
         println!("Server Frame Size: {} bytes", server_frame.len());
 
@@ -130,13 +106,19 @@ fn server(ip: String) -> Result<(), RenetError> {
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected(id) => {
-                    let player = Player::new(id as u32);
-                    server_state.players.insert(player.id, player);
+                    world.run(
+                        |mut entities: EntitiesViewMut, mut players: ViewMut<Player>| {
+                            let player = Player::new(id as u32);
+                            let entity_id = entities.add_entity(&mut players, player);
+                            server_state.player_mapping.insert(id, entity_id);
+                        },
+                    );
                 }
                 ServerEvent::ClientDisconnected(id) => {
-                    let id = id as u32;
-                    if let Some(_) = server_state.players.remove(&id) {
-                        server_state.players_input.remove(&id);
+                    if let Some(entity_id) = server_state.player_mapping.remove(&id) {
+                        world.run(|mut all_storages: AllStoragesViewMut| {
+                            all_storages.delete(entity_id);
+                        });
                     }
                 }
             }
@@ -147,5 +129,44 @@ fn server(ip: String) -> Result<(), RenetError> {
         if let Some(wait) = (start + frame_duration).checked_duration_since(now) {
             sleep(wait);
         }
+    }
+}
+
+fn update_players(mut players: ViewMut<Player>, inputs: View<PlayerInput>) {
+    for (player, input) in (&mut players, &inputs).iter() {
+        player.update_from_input(input);
+        player.animation_manager.update();
+    }
+}
+
+fn update_projectiles(mut all_storages: AllStoragesViewMut) {
+    let mut remove = vec![];
+
+    {
+        let mut projectiles = all_storages.borrow::<ViewMut<Projectile>>();
+        for (entity_id, projectile) in (&mut projectiles).iter().with_id() {
+            projectile.position.x += projectile.direction.x * 4.0;
+            projectile.position.y += projectile.direction.y * 4.0;
+            projectile.duration = projectile
+                .duration
+                .checked_sub(Duration::from_micros(16666))
+                .unwrap_or(Duration::from_micros(0));
+            if projectile.duration.as_nanos() == 0 {
+                remove.push(entity_id);
+            }
+        }
+    }
+    for entity_id in remove {
+        all_storages.delete(entity_id);
+    }
+}
+
+fn world_server_frame(player: View<Player>, projectiles: View<Projectile>) -> ServerFrame {
+    let players: Vec<PlayerState> = player.iter().map(|p| p.state()).collect();
+    let projectiles: Vec<ProjectileState> = projectiles.iter().map(|p| p.state()).collect();
+
+    ServerFrame {
+        players,
+        projectiles,
     }
 }

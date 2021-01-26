@@ -94,7 +94,7 @@ impl Player {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerInput {
     pub up: bool,
     pub down: bool,
@@ -232,7 +232,7 @@ impl AnimationManager<PlayerAnimations> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CastTarget {
     pub position: Vec2
 }

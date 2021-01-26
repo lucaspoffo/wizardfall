@@ -240,7 +240,7 @@ impl App {
     }
 }
 
-#[macroquad::main("NaiaMacroquadExample")]
+#[macroquad::main("Renet macroquad demo")]
 async fn main() {
     TermLogger::default().init().unwrap();
     rand::srand(
