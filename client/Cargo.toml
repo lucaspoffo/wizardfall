@@ -15,3 +15,4 @@ log = "0.4.11"
 alto_logger = "0.3.6"
 lazy_static = "1.4.0"
 async_once = "0.2.1"
+shipyard = { git = "https://github.com/leudz/shipyard.git", rev = "a87e59e441d938bd7dc18bebf97456eff8707484" }

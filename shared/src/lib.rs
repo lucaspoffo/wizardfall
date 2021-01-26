@@ -32,7 +32,7 @@ pub struct Player {
     pub animation_manager: AnimationManager<PlayerAnimations>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
     pub id: u32,
     pub position: Vec2,
@@ -128,7 +128,7 @@ pub struct AnimationController {
     total_frames: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationState<T> {
     pub frame: u32,
     pub current_animation: T,
@@ -251,7 +251,7 @@ pub enum ProjectileType {
 
 #[derive(Debug)]
 pub struct Projectile {
-    id: u32,
+    pub id: u32,
     projectile_type: ProjectileType,
     owner: u32,
     pub position: Vec2,
@@ -312,7 +312,7 @@ impl Projectile {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectileState {
     pub id: u32,
     projectile_type: ProjectileType,
