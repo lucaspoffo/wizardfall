@@ -25,6 +25,20 @@ pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
     channels_config
 }
 
+pub trait NetworkId {
+    fn id(&self) -> u32;
+}
+
+pub trait NetworkState {
+    type State: NetworkId;
+
+    fn from_state(state: &Self::State) -> Self;
+    fn update_from_state(&mut self, state: &Self::State);
+    fn state(&self) -> Self::State;
+    // TODO: Refactor when StateFrame is using EntityId
+    fn id(&self) -> u32;
+}
+
 #[derive(Debug)]
 pub struct Player {
     pub id: u32,
@@ -39,20 +53,18 @@ pub struct PlayerState {
     pub animation_state: AnimationState<PlayerAnimations>,
 }
 
+impl NetworkId for PlayerState {
+    fn id(&self) -> u32 {
+        self.id
+    }
+}
+
 impl Player {
     pub fn new(id: u32) -> Self {
         Self {
             id,
             position: vec2(100.0, 100.0),
             animation_manager: AnimationManager::new(),
-        }
-    }
-
-    pub fn from_state(state: &PlayerState) -> Self {
-        Self {
-            id: state.id,
-            position: state.position,
-            animation_manager: AnimationManager::from_state(&state.animation_state),
         }
     }
 
@@ -77,15 +89,31 @@ impl Player {
             self.animation_manager.h_flip = !input.right;
         }
     }
+}
 
-    pub fn update_from_state(&mut self, state: &PlayerState) {
+impl NetworkState for Player {
+    type State = PlayerState;
+
+    fn id(&self) -> u32 {
+        self.id
+    }
+
+    fn from_state(state: &PlayerState) -> Self {
+        Self {
+            id: state.id,
+            position: state.position,
+            animation_manager: AnimationManager::from_state(&state.animation_state),
+        }
+    }
+
+    fn update_from_state(&mut self, state: &PlayerState) {
         self.position.x = state.position.x;
         self.position.y = state.position.y;
         self.animation_manager
             .update_from_state(&state.animation_state);
     }
 
-    pub fn state(&self) -> PlayerState {
+    fn state(&self) -> PlayerState {
         PlayerState {
             id: self.id,
             position: self.position,
@@ -234,7 +262,7 @@ impl AnimationManager<PlayerAnimations> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CastTarget {
-    pub position: Vec2
+    pub position: Vec2,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -246,7 +274,6 @@ pub enum PlayerAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProjectileType {
     Fireball,
-
 }
 
 #[derive(Debug)]
@@ -282,8 +309,16 @@ impl Projectile {
             duration: Duration::from_secs(2),
         }
     }
+}
 
-    pub fn from_state(state: &ProjectileState) -> Self {
+impl NetworkState for Projectile {
+    type State = ProjectileState;
+
+    fn id(&self) -> u32 {
+        self.id
+    }
+
+    fn from_state(state: &ProjectileState) -> Self {
         Self {
             id: state.id,
             rotation: state.rotation,
@@ -295,7 +330,7 @@ impl Projectile {
         }
     }
 
-    pub fn state(&self) -> ProjectileState {
+    fn state(&self) -> ProjectileState {
         ProjectileState {
             id: self.id,
             projectile_type: self.projectile_type.clone(),
@@ -305,7 +340,7 @@ impl Projectile {
         }
     }
 
-    pub fn update_from_state(&mut self, state: &ProjectileState) {
+    fn update_from_state(&mut self, state: &ProjectileState) {
         self.position.x = state.position.x;
         self.position.y = state.position.y;
         self.rotation = state.rotation;
@@ -319,4 +354,10 @@ pub struct ProjectileState {
     owner: u32,
     position: Vec2,
     rotation: f32,
+}
+
+impl NetworkId for ProjectileState {
+    fn id(&self) -> u32 {
+        self.id
+    }
 }

@@ -1,6 +1,6 @@
 use shared::{
     channels, Player, PlayerAction, PlayerInput, PlayerState, Projectile, ProjectileState,
-    ProjectileType, ServerFrame,
+    ProjectileType, ServerFrame, NetworkState
 };
 
 use alto_logger::TermLogger;

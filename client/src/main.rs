@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use macroquad::prelude::*;
 use shared::{
     channels, AnimationManager, CastTarget, Player, PlayerAction, PlayerAnimations, PlayerInput,
-    PlayerState, Projectile, ProjectileState, ServerFrame,
+    PlayerState, Projectile, ProjectileState, ServerFrame, NetworkState, NetworkId
 };
 
 use alto_logger::TermLogger;
@@ -127,12 +127,12 @@ impl App {
                 bincode::deserialize(payload).expect("Failed to deserialize state.");
 
             self.world.run_with_data(
-                update_players,
+                update_network_state::<Player>,
                 (&server_frame.players, &mut self.entity_mapping),
             ).unwrap();
 
             self.world.run_with_data(
-                update_projectiles,
+                update_network_state::<Projectile>,
                 (&server_frame.projectiles, &mut self.entity_mapping),
             ).unwrap();
         }
@@ -194,31 +194,30 @@ fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
     }
 }
 
-// TODO: Make this fn generic
-fn update_players(
-    (players_state, entity_mapping): (&[PlayerState], &mut EntityMapping),
+fn update_network_state<T: NetworkState + 'static + Send + Sync>(
+    (entities_state, entity_mapping): (&[T::State], &mut EntityMapping),
     mut all_storages: AllStoragesViewMut,
 ) {
-    let removed_players: Vec<EntityId> = {
+    let removed_entities: Vec<EntityId> = {
         let mut entities = all_storages.borrow::<EntitiesViewMut>().unwrap();
-        let mut players = all_storages.borrow::<ViewMut<Player>>().unwrap();
+        let mut network_entities = all_storages.borrow::<ViewMut<T>>().unwrap();
 
-        for player_state in players_state.iter() {
-            let player_entity_id = entity_mapping.entry(player_state.id).or_insert_with(|| {
-                let player = Player::from_state(player_state);
-                entities.add_entity(&mut players, player)
+        for state in entities_state.iter() {
+            let entity_id = entity_mapping.entry(state.id()).or_insert_with(|| {
+                let entity = T::from_state(state);
+                entities.add_entity(&mut network_entities, entity)
             });
-            if let Ok(mut player) = (&mut players).get(*player_entity_id) {
-                player.update_from_state(&player_state);
+            if let Ok(mut entity) = (&mut network_entities).get(*entity_id) {
+                entity.update_from_state(&state);
             }
         }
 
-        let players_id: Vec<u32> = players_state.iter().map(|p| p.id).collect();
+        let network_entities_id: Vec<u32> = entities_state.iter().map(|p| p.id()).collect();
 
-        let removed_id: Vec<u32> = players
+        let removed_id: Vec<u32> = network_entities
             .iter()
-            .filter(|player| !players_id.contains(&player.id))
-            .map(|player| player.id)
+            .filter(|entity| !network_entities_id.contains(&entity.id()))
+            .map(|entity| entity.id())
             .collect();
 
         let mut removed = vec![];
@@ -231,51 +230,7 @@ fn update_players(
         removed
     };
 
-    for id in removed_players {
-        all_storages.delete_entity(id);
-    }
-}
-
-fn update_projectiles(
-    (projectiles_state, entity_mapping): (&[ProjectileState], &mut EntityMapping),
-    mut all_storages: AllStoragesViewMut,
-) {
-    let removed_projectiles: Vec<EntityId> = {
-        let mut entities = all_storages.borrow::<EntitiesViewMut>().unwrap();
-        let mut projectiles = all_storages.borrow::<ViewMut<Projectile>>().unwrap();
-
-        for projectile_state in projectiles_state.iter() {
-            let projectile_entity_id =
-                entity_mapping
-                    .entry(projectile_state.id)
-                    .or_insert_with(|| {
-                        let projectile = Projectile::from_state(projectile_state);
-                        entities.add_entity(&mut projectiles, projectile)
-                    });
-            if let Ok(mut projectile) = (&mut projectiles).get(*projectile_entity_id) {
-                projectile.update_from_state(&projectile_state);
-            }
-        }
-
-        let projectiles_id: Vec<u32> = projectiles_state.iter().map(|p| p.id).collect();
-
-        let removed_id: Vec<u32> = projectiles
-            .iter()
-            .filter(|projectile| !projectiles_id.contains(&projectile.id))
-            .map(|projectile| projectile.id)
-            .collect();
-
-        let mut removed = vec![];
-        for id in removed_id {
-            if let Some(entity_id) = entity_mapping.remove(&id) {
-                removed.push(entity_id);
-            }
-        }
-
-        removed
-    };
-
-    for id in removed_projectiles {
+    for id in removed_entities {
         all_storages.delete_entity(id);
     }
 }
