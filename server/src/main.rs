@@ -1,6 +1,6 @@
 use shared::{
-    channels, Player, PlayerAction, PlayerInput, PlayerState, Projectile, ProjectileState,
-    ProjectileType, ServerFrame, NetworkState
+    channels, AnimationController, AnimationManager, Player, PlayerAction, PlayerAnimations,
+    PlayerInput, Projectile, ProjectileType, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -12,6 +12,7 @@ use renet::{
     server::{Server, ServerConfig, ServerEvent},
 };
 
+use glam::{vec2, Vec2};
 use shipyard::*;
 
 use std::collections::HashMap;
@@ -27,9 +28,7 @@ fn main() -> Result<(), RenetError> {
     Ok(())
 }
 
-struct ServerState {
-    player_mapping: HashMap<u64, EntityId>,
-}
+type PlayerMapping = HashMap<u64, EntityId>;
 
 fn server(ip: String) -> Result<(), RenetError> {
     let socket = UdpSocket::bind(ip)?;
@@ -39,11 +38,10 @@ fn server(ip: String) -> Result<(), RenetError> {
     let mut server: Server<UnsecureServerProtocol> =
         Server::new(socket, server_config, endpoint_config, channels())?;
 
-    let mut server_state = ServerState {
-        player_mapping: HashMap::new(),
-    };
-
     let world = World::new();
+
+    world.add_unique(PlayerMapping::new()).unwrap();
+    world.add_unique(AnimationManager::<PlayerAnimations>::new()).unwrap();
 
     loop {
         let start = Instant::now();
@@ -52,11 +50,15 @@ fn server(ip: String) -> Result<(), RenetError> {
         for (client_id, messages) in server.get_messages_from_channel(0).iter() {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
-                if let Some(player_entity_id) = server_state.player_mapping.get(client_id) {
-                    world.run(|entities: EntitiesView, mut inputs: ViewMut<PlayerInput>| {
-                        entities.add_component(&mut inputs, input, *player_entity_id);
-                    });
-                }
+                world.run(
+                    |player_mapping: UniqueView<PlayerMapping>,
+                     entities: EntitiesView,
+                     mut inputs: ViewMut<PlayerInput>| {
+                        if let Some(entity_id) = player_mapping.get(client_id) {
+                            entities.add_component(*entity_id, &mut inputs, input);
+                        }
+                    },
+                ).unwrap();
             }
         }
 
@@ -66,36 +68,50 @@ fn server(ip: String) -> Result<(), RenetError> {
                     deserialize(message).expect("Failed to deserialize.");
                 match player_action {
                     PlayerAction::CastFireball(cast_target) => {
-                        if let Some(player_entity_id) = server_state.player_mapping.get(&client_id) {
-                            world.run(|mut entities: EntitiesViewMut, mut players: View<Player>, mut projectiles: ViewMut<Projectile>| {
-                                let player = (&mut players).get(*player_entity_id);
-                                let projectile = Projectile::from_cast_target(
-                                    ProjectileType::Fireball,
-                                    *client_id as u32,
-                                    cast_target,
-                                    player.position,
-                                );
-                                entities.add_entity(&mut projectiles, projectile);
-                            });
-                        }
+                        world.run(
+                            |player_mapping: UniqueView<PlayerMapping>,
+                             mut entities: EntitiesViewMut,
+                             mut transforms: ViewMut<Transform>,
+                             mut projectiles: ViewMut<Projectile>| {
+                                if let Some(entity_id) = player_mapping.get(client_id) {
+                                    let transform = (&transforms).get(*entity_id).unwrap();
+                                    let projectile = Projectile::new(ProjectileType::Fireball);
+                                    let direction =
+                                        (cast_target.position - transform.position).normalize();
+                                    let rotation = direction.angle_between(Vec2::unit_x());
+                                    let transform = Transform::new(transform.position, rotation);
+                                    entities.add_entity(
+                                        (&mut projectiles, &mut transforms),
+                                        (projectile, transform),
+                                    );
+                                }
+                            },
+                        ).unwrap();
                     }
                     PlayerAction::CastTeleport(cast_target) => {
-                        if let Some(entity_id) = server_state.player_mapping.get(&client_id) {
-                            world.run(|mut players: ViewMut<Player>| {
-                                let player = (&mut players).get(*entity_id);
-                                player.position.x = cast_target.position.x;
-                                player.position.y = cast_target.position.y;
-                            });
-                        }
+                        world.run(
+                            |player_mapping: UniqueView<PlayerMapping>,
+                             mut transforms: ViewMut<Transform>| {
+                                if let Some(entity_id) = player_mapping.get(client_id) {
+                                    let mut transform = (&mut transforms).get(*entity_id).unwrap();
+                                    transform.position.x = cast_target.position.x;
+                                    transform.position.y = cast_target.position.y;
+                                }
+                            },
+                        ).unwrap();
                     }
                 }
             }
         }
 
-        world.run(update_players);
-        world.run(update_projectiles);
+        world.run(update_players).unwrap();
+        world.run(update_projectiles).unwrap();
 
-        let server_frame = world.run(world_server_frame);
+        world.run(debug::<Player>).unwrap();
+        world.run(debug::<PlayerInput>).unwrap();
+        world.run(debug::<Transform>).unwrap();
+
+        let server_frame = world.run(world_server_frame).unwrap();
 
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
         println!("Server Frame Size: {} bytes", server_frame.len());
@@ -106,20 +122,10 @@ fn server(ip: String) -> Result<(), RenetError> {
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected(id) => {
-                    world.run(
-                        |mut entities: EntitiesViewMut, mut players: ViewMut<Player>| {
-                            let player = Player::new(id as u32);
-                            let entity_id = entities.add_entity(&mut players, player);
-                            server_state.player_mapping.insert(id, entity_id);
-                        },
-                    );
+                    world.run_with_data(create_player, id).unwrap();
                 }
                 ServerEvent::ClientDisconnected(id) => {
-                    if let Some(entity_id) = server_state.player_mapping.remove(&id) {
-                        world.run(|mut all_storages: AllStoragesViewMut| {
-                            all_storages.delete(entity_id);
-                        });
-                    }
+                    world.run_with_data(remove_player, id).unwrap();
                 }
             }
         }
@@ -132,21 +138,25 @@ fn server(ip: String) -> Result<(), RenetError> {
     }
 }
 
-fn update_players(mut players: ViewMut<Player>, inputs: View<PlayerInput>) {
-    for (player, input) in (&mut players, &inputs).iter() {
-        player.update_from_input(input);
-        player.animation_manager.update();
+fn world_server_frame(player: View<Player>, projectiles: View<Projectile>) -> ServerFrame {
+    ServerFrame {
+        players: vec![],
+        projectiles: vec![],
     }
 }
 
 fn update_projectiles(mut all_storages: AllStoragesViewMut) {
     let mut remove = vec![];
-
     {
-        let mut projectiles = all_storages.borrow::<ViewMut<Projectile>>();
-        for (entity_id, projectile) in (&mut projectiles).iter().with_id() {
-            projectile.position.x += projectile.direction.x * 4.0;
-            projectile.position.y += projectile.direction.y * 4.0;
+        let mut projectiles = all_storages.borrow::<ViewMut<Projectile>>().unwrap();
+        let mut transforms = all_storages.borrow::<ViewMut<Transform>>().unwrap();
+
+        for (entity_id, (mut projectile, mut transform)) in
+            (&mut projectiles, &mut transforms).iter().with_id()
+        {
+            let direction = Vec2::new(transform.rotation.cos(), transform.rotation.sin());
+            transform.position.x += direction.x * 4.0;
+            transform.position.y += direction.y * 4.0;
             projectile.duration = projectile
                 .duration
                 .checked_sub(Duration::from_micros(16666))
@@ -157,16 +167,75 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
         }
     }
     for entity_id in remove {
-        all_storages.delete(entity_id);
+        all_storages.delete_entity(entity_id);
     }
 }
 
-fn world_server_frame(player: View<Player>, projectiles: View<Projectile>) -> ServerFrame {
-    let players: Vec<PlayerState> = player.iter().map(|p| p.state()).collect();
-    let projectiles: Vec<ProjectileState> = projectiles.iter().map(|p| p.state()).collect();
+fn update_players(
+    players: View<Player>,
+    inputs: View<PlayerInput>,
+    mut transforms: ViewMut<Transform>,
+    mut animations: ViewMut<AnimationController>,
+    player_animations: UniqueView<AnimationManager<PlayerAnimations>>,
+) {
+    for (_, input, mut transform, mut animation) in
+        (&players, &inputs, &mut transforms, &mut animations).iter()
+    {
+        let x = (input.right as i8 - input.left as i8) as f32;
+        let y = (input.down as i8 - input.up as i8) as f32;
+        let mut direction = vec2(x, y);
 
-    ServerFrame {
-        players,
-        projectiles,
+        if direction.length() != 0.0 {
+            direction = direction.normalize();
+            transform.position.x += direction.x * 4.0;
+            transform.position.y += direction.y * 4.0;
+        }
+
+        if input.right ^ input.left || input.down ^ input.up {
+            animation.change_animation(
+                player_animations.get_animation_controller(&PlayerAnimations::Run),
+            );
+        } else {
+            animation.change_animation(
+                player_animations.get_animation_controller(&PlayerAnimations::Idle),
+            );
+        }
+    }
+}
+
+fn create_player(
+    client_id: u64,
+    mut entities: EntitiesViewMut,
+    mut transforms: ViewMut<Transform>,
+    mut players: ViewMut<Player>,
+    mut animations: ViewMut<AnimationController>,
+    mut player_mapping: UniqueViewMut<PlayerMapping>,
+    player_animations: UniqueView<AnimationManager<PlayerAnimations>>,
+) {
+    let player = Player::new(client_id);
+    let transform = Transform::default();
+    let animation = player_animations.get_animation_controller(&PlayerAnimations::Idle);
+
+    let entity_id = entities.add_entity(
+        (&mut players, &mut transforms, &mut animations),
+        (player, transform, animation),
+    );
+
+    player_mapping.insert(client_id, entity_id);
+}
+
+fn remove_player(client_id: u64, mut all_storages: AllStoragesViewMut) {
+    let player_entity_id = {
+        let player_mapping = all_storages.borrow::<UniqueView<PlayerMapping>>().unwrap();
+        player_mapping.get(&client_id).map(|id| id.clone())
+    };
+    if let Some(entity_id) = player_entity_id {
+        all_storages.delete_entity(entity_id);
+    }
+}
+
+fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
+    for entity in view.iter() {
+        println!("{:?}", entity);
     }
 }

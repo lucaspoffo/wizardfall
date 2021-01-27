@@ -84,16 +84,7 @@ dependencies = [
  "macroquad",
  "renet",
  "shared",
- "shipyard 0.4.1 (git+https://github.com/leudz/shipyard.git?rev=a87e59e441d938bd7dc18bebf97456eff8707484)",
-]
-
-[[package]]
-name = "cloudabi"
-version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
-dependencies = [
- "bitflags",
+ "shipyard",
 ]
 
 [[package]]
@@ -201,16 +192,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96282e96bfcd3da0d3aa9938bedf1e50df3269b6db08b4876d2da0bb1a0841cf"
-dependencies = [
- "ahash 0.3.8",
- "autocfg",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e91b62f79061a0bc2e046024cb7ba44b08419ed238ecbd9adbd787434b9e8c25"
@@ -289,15 +270,6 @@ name = "libc"
 version = "0.2.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89203f3fba0a3795506acaad8ebce3c80c0af93f994d5a1d7a0b1eeb23271929"
-
-[[package]]
-name = "lock_api"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4da24a77a3d8a6d4862d95f72e6fdb9c09a643ecdb402d754004a557f2bec75"
-dependencies = [
- "scopeguard",
-]
 
 [[package]]
 name = "lock_api"
@@ -415,37 +387,13 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3a704eb390aafdc107b0e392f56a82b668e3a71366993b5340f5833fd62505e"
-dependencies = [
- "lock_api 0.3.4",
- "parking_lot_core 0.7.2",
-]
-
-[[package]]
-name = "parking_lot"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d7744ac029df22dca6284efe4e898991d28e3085c706c972bcd7da4a27a15eb"
 dependencies = [
  "instant",
- "lock_api 0.4.2",
- "parking_lot_core 0.8.2",
-]
-
-[[package]]
-name = "parking_lot_core"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d58c7c768d4ba344e3e8d72518ac13e259d7c7ade24167003b8488e10b6740a3"
-dependencies = [
- "cfg-if 0.1.10",
- "cloudabi",
- "libc",
- "redox_syscall",
- "smallvec",
- "winapi",
+ "lock_api",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -648,7 +596,7 @@ dependencies = [
  "log",
  "renet",
  "shared",
- "shipyard 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "shipyard",
 ]
 
 [[package]]
@@ -663,23 +611,11 @@ dependencies = [
 [[package]]
 name = "shipyard"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3f05dded110259370cf2bb98206cc8489422a43d836ff9270be9213caf0044"
-dependencies = [
- "hashbrown 0.7.2",
- "num_cpus",
- "parking_lot 0.10.2",
- "rayon",
-]
-
-[[package]]
-name = "shipyard"
-version = "0.4.1"
 source = "git+https://github.com/leudz/shipyard.git?rev=a87e59e441d938bd7dc18bebf97456eff8707484#a87e59e441d938bd7dc18bebf97456eff8707484"
 dependencies = [
  "hashbrown 0.9.1",
  "indexmap",
- "parking_lot 0.11.1",
+ "parking_lot",
  "rayon",
 ]
 

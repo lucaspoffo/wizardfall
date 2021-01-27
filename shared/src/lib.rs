@@ -40,10 +40,31 @@ pub trait NetworkState {
 }
 
 #[derive(Debug)]
-pub struct Player {
-    pub id: u32,
+pub struct Transform {
     pub position: Vec2,
-    pub animation_manager: AnimationManager<PlayerAnimations>,
+    pub rotation: f32,
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            position: vec2(0.0, 0.0),
+            rotation: 0.0,
+        }
+    }
+}
+
+impl Transform {
+    pub fn new(position: Vec2, rotation: f32) -> Self {
+        Self { position, rotation }
+    }
+}
+
+pub struct AnimationComponent {}
+
+#[derive(Debug)]
+pub struct Player {
+    pub client_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,65 +81,14 @@ impl NetworkId for PlayerState {
 }
 
 impl Player {
-    pub fn new(id: u32) -> Self {
-        Self {
-            id,
-            position: vec2(100.0, 100.0),
-            animation_manager: AnimationManager::new(),
-        }
-    }
-
-    pub fn update_from_input(&mut self, input: &PlayerInput) {
-        let x = (input.right as i8 - input.left as i8) as f32;
-        let y = (input.down as i8 - input.up as i8) as f32;
-        let mut direction = vec2(x, y);
-
-        if direction.length() != 0.0 {
-            direction = direction.normalize();
-            self.position.x += direction.x * 4.0;
-            self.position.y += direction.y * 4.0;
-        }
-
-        if input.right ^ input.left || input.down ^ input.up {
-            self.animation_manager.play(PlayerAnimations::Run);
-        } else {
-            self.animation_manager.play(PlayerAnimations::Idle);
-        }
-
-        if input.right ^ input.left {
-            self.animation_manager.h_flip = !input.right;
-        }
+    pub fn new(client_id: u64) -> Self {
+        Self { client_id }
     }
 }
 
-impl NetworkState for Player {
-    type State = PlayerState;
-
-    fn id(&self) -> u32 {
-        self.id
-    }
-
-    fn from_state(state: &PlayerState) -> Self {
-        Self {
-            id: state.id,
-            position: state.position,
-            animation_manager: AnimationManager::from_state(&state.animation_state),
-        }
-    }
-
-    fn update_from_state(&mut self, state: &PlayerState) {
-        self.position.x = state.position.x;
-        self.position.y = state.position.y;
-        self.animation_manager
-            .update_from_state(&state.animation_state);
-    }
-
-    fn state(&self) -> PlayerState {
-        PlayerState {
-            id: self.id,
-            position: self.position,
-            animation_state: self.animation_manager.state(),
-        }
+impl Player {
+    fn id(&self) -> u64 {
+        self.client_id
     }
 }
 
@@ -141,15 +111,9 @@ pub enum Messages {
     ServerFrame(ServerFrame),
 }
 
-// TODO:
-// Make PlayerState that is the serializable stuff from player
-// impl From<Player> for PlayerState
-// impl Player fn update_from_state(&mut self, state: PlayerState)
-// Pass animation to Player
-// struct AnimationState (animation stuff that goes throught network)
-// impl AnimationController fn update_from_state(&mut self, state: AnimationState)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AnimationController {
+    animation: u8,
     pub frame: u32,
     speed: Duration,
     last_updated: Instant,
@@ -160,18 +124,29 @@ pub struct AnimationController {
 pub struct AnimationState<T> {
     pub frame: u32,
     pub current_animation: T,
-    h_flip: bool,
 }
 
 impl AnimationController {
     pub fn new(fps: u64, total_frames: u32) -> Self {
         let speed = Duration::from_millis(1000 / fps);
         Self {
+            animation: 0,
             speed,
             total_frames,
             frame: 0,
             last_updated: Instant::now(),
         }
+    }
+
+    pub fn change_animation(&mut self, animation: AnimationController) {
+        if self.animation == animation.animation {
+            return;
+        }
+        self.animation = animation.animation;
+        self.frame = 0;
+        self.speed = animation.speed;
+        self.last_updated = Instant::now();
+        self.total_frames = animation.total_frames;
     }
 
     pub fn update(&mut self) {
@@ -197,45 +172,13 @@ pub enum PlayerAnimations {
 
 #[derive(Debug)]
 pub struct AnimationManager<T> {
-    pub current_animation: T,
-    pub h_flip: bool,
     animations: HashMap<T, AnimationController>,
 }
 
 impl<T: Eq + Hash + Clone> AnimationManager<T> {
-    pub fn update(&mut self) {
-        let animation = self.animations.get_mut(&self.current_animation).unwrap();
-        animation.update();
-    }
-
-    pub fn play(&mut self, animation: T) {
-        if self.current_animation == animation {
-            return;
-        }
-
-        let current_animation = self.animations.get_mut(&self.current_animation).unwrap();
-        current_animation.reset();
-        self.current_animation = animation;
-    }
-
-    pub fn current_animation_controller(&self) -> &AnimationController {
-        self.animations.get(&self.current_animation).unwrap()
-    }
-
-    pub fn update_from_state(&mut self, state: &AnimationState<T>) {
-        self.current_animation = state.current_animation.clone();
-        self.h_flip = state.h_flip;
-        let current_animation = self.animations.get_mut(&self.current_animation).unwrap();
-        current_animation.frame = state.frame;
-    }
-
-    pub fn state(&self) -> AnimationState<T> {
-        let animation = self.animations.get(&self.current_animation).unwrap();
-        AnimationState {
-            current_animation: self.current_animation.clone(),
-            frame: animation.frame,
-            h_flip: self.h_flip,
-        }
+    pub fn get_animation_controller(&self, animation: &T) -> AnimationController {
+        let animation = self.animations.get(animation).unwrap();
+        (*animation).clone()
     }
 }
 
@@ -246,17 +189,7 @@ impl AnimationManager<PlayerAnimations> {
         let run = AnimationController::new(13, 8);
         animations.insert(PlayerAnimations::Idle, idle);
         animations.insert(PlayerAnimations::Run, run);
-        Self {
-            current_animation: PlayerAnimations::Idle,
-            animations,
-            h_flip: false,
-        }
-    }
-
-    pub fn from_state(state: &AnimationState<PlayerAnimations>) -> Self {
-        let mut animation_manager = AnimationManager::new();
-        animation_manager.update_from_state(state);
-        animation_manager
+        Self { animations }
     }
 }
 
@@ -278,72 +211,16 @@ pub enum ProjectileType {
 
 #[derive(Debug)]
 pub struct Projectile {
-    pub id: u32,
     projectile_type: ProjectileType,
-    owner: u32,
-    pub position: Vec2,
-    pub direction: Vec2,
-    pub rotation: f32,
     pub duration: Duration,
 }
 
-static NEXT_ID: AtomicU32 = AtomicU32::new(0);
-
 impl Projectile {
-    pub fn from_cast_target(
-        projectile_type: ProjectileType,
-        owner: u32,
-        cast_target: CastTarget,
-        origin: Vec2,
-    ) -> Self {
-        let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-        let direction = (cast_target.position - origin).normalize();
-        let rotation = direction.angle_between(Vec2::unit_x());
+    pub fn new(projectile_type: ProjectileType) -> Self {
         Self {
-            id,
-            rotation,
             projectile_type,
-            owner,
-            position: origin,
-            direction,
             duration: Duration::from_secs(2),
         }
-    }
-}
-
-impl NetworkState for Projectile {
-    type State = ProjectileState;
-
-    fn id(&self) -> u32 {
-        self.id
-    }
-
-    fn from_state(state: &ProjectileState) -> Self {
-        Self {
-            id: state.id,
-            rotation: state.rotation,
-            projectile_type: state.projectile_type.clone(),
-            position: state.position,
-            owner: state.owner,
-            direction: Vec2::unit_x(),
-            duration: Duration::from_secs(0),
-        }
-    }
-
-    fn state(&self) -> ProjectileState {
-        ProjectileState {
-            id: self.id,
-            projectile_type: self.projectile_type.clone(),
-            owner: self.owner,
-            position: self.position,
-            rotation: self.direction.angle_between(Vec2::unit_x()),
-        }
-    }
-
-    fn update_from_state(&mut self, state: &ProjectileState) {
-        self.position.x = state.position.x;
-        self.position.y = state.position.y;
-        self.rotation = state.rotation;
     }
 }
 

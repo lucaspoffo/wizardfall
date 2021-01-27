@@ -121,7 +121,7 @@ impl App {
         for payload in self.connection.receive_all_messages_from_channel(1).iter() {
             let server_frame: ServerFrame =
                 bincode::deserialize(payload).expect("Failed to deserialize state.");
-
+            /*
             self.world
                 .run_with_data(
                     update_network_state::<Player>,
@@ -135,6 +135,7 @@ impl App {
                     (&server_frame.projectiles, &mut self.entity_mapping),
                 )
                 .unwrap();
+            */
         }
 
         // println!("{:?}", self.world);
@@ -236,6 +237,7 @@ fn update_network_state<T: NetworkState + 'static + Send + Sync>(
 }
 
 fn draw_players(player_texture: UniqueView<PlayerTexture>, players: View<Player>) {
+    /*
     for player in players.iter() {
         let current_animation = &player.animation_manager.current_animation;
         let texture_animation = player_texture.get(current_animation).unwrap();
@@ -264,9 +266,11 @@ fn draw_players(player_texture: UniqueView<PlayerTexture>, players: View<Player>
 
         draw_texture_ex(texture_animation.texture, x, y, WHITE, params)
     }
+    */
 }
 
 fn draw_projectiles(projectiles: View<Projectile>) {
+    /*
     for projectile in projectiles.iter() {
         draw_rectangle(
             projectile.position.x,
@@ -276,6 +280,7 @@ fn draw_projectiles(projectiles: View<Projectile>) {
             RED,
         );
     }
+    */
 }
 
 fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
