@@ -194,7 +194,7 @@ fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
         sleep(Duration::from_millis(20));
     }
 }
-
+/*
 fn update_network_state<T: NetworkState + 'static + Send + Sync>(
     (entities_state, entity_mapping): (&[T::State], &mut EntityMapping),
     mut all_storages: AllStoragesViewMut,
@@ -235,6 +235,7 @@ fn update_network_state<T: NetworkState + 'static + Send + Sync>(
         all_storages.delete_entity(id);
     }
 }
+*/
 
 fn draw_players(player_texture: UniqueView<PlayerTexture>, players: View<Player>) {
     /*

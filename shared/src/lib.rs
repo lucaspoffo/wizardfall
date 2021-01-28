@@ -1,12 +1,14 @@
+use derive::NetworkState;
+
 use glam::{vec2, Vec2};
 use renet::channel::{
     ChannelConfig, ReliableOrderedChannelConfig, UnreliableUnorderedChannelConfig,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use shipyard::{EntitiesView, EntityId, IntoIter, IntoWithId, View, World};
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
@@ -30,16 +32,14 @@ pub trait NetworkId {
 }
 
 pub trait NetworkState {
-    type State: NetworkId;
+    type State: Clone;
 
-    fn from_state(state: &Self::State) -> Self;
-    fn update_from_state(&mut self, state: &Self::State);
+    fn from_state(state: Self::State) -> Self;
+    fn update_from_state(&mut self, state: Self::State);
     fn state(&self) -> Self::State;
-    // TODO: Refactor when StateFrame is using EntityId
-    fn id(&self) -> u32;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Transform {
     pub position: Vec2,
     pub rotation: f32,
@@ -60,35 +60,14 @@ impl Transform {
     }
 }
 
-pub struct AnimationComponent {}
-
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Player {
     pub client_id: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlayerState {
-    pub id: u32,
-    pub position: Vec2,
-    pub animation_state: AnimationState<PlayerAnimations>,
-}
-
-impl NetworkId for PlayerState {
-    fn id(&self) -> u32 {
-        self.id
-    }
 }
 
 impl Player {
     pub fn new(client_id: u64) -> Self {
         Self { client_id }
-    }
-}
-
-impl Player {
-    fn id(&self) -> u64 {
-        self.client_id
     }
 }
 
@@ -102,8 +81,57 @@ pub struct PlayerInput {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerFrame {
-    pub players: Vec<PlayerState>,
-    pub projectiles: Vec<ProjectileState>,
+    entities: Vec<EntityId>,
+    players: NetworkComponent<Player>,
+    projectiles: NetworkComponent<Projectile>,
+    transforms: NetworkComponent<Transform>,
+}
+
+impl ServerFrame {
+    pub fn from_world(world: &World) -> Self {
+        let entities: Vec<EntityId> = world
+            .run(|entities: EntitiesView| entities.iter().collect())
+            .unwrap();
+
+
+        Self {
+            players: NetworkComponent::<Player>::from_world(&entities, world),
+            projectiles: NetworkComponent::<Projectile>::from_world(&entities, world),
+            transforms: NetworkComponent::<Transform>::from_world(&entities, world),
+            entities,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct NetworkComponent<T>
+    {
+    bitmask: Vec<bool>,
+    values: Vec<T>,
+}
+
+impl<T: 'static + Sync + Send + Clone + NetworkState> NetworkComponent<T> {
+    fn from_world(entities_id: &[EntityId], world: &World) -> NetworkComponent<T::State> {
+        let mut bitmask: Vec<bool> = vec![false; entities_id.len()];
+        let mut values: Vec<Option<T::State>> = vec![None; entities_id.len()];
+        world
+            .run(|components: View<T>| {
+                for (entity_id, component) in components.iter().with_id() {
+                    let id_pos = entities_id
+                        .iter()
+                        .position(|&x| x == entity_id)
+                        .expect("Network component EntityID not found.");
+
+                    bitmask[id_pos] = true;
+                    values[id_pos] = Some(component.state());
+                }
+            })
+            .unwrap();
+
+        let values = values.iter_mut().filter_map(|v| v.take()).collect();
+
+        NetworkComponent { bitmask, values }
+    }
 }
 
 pub enum Messages {
@@ -114,20 +142,20 @@ pub enum Messages {
 #[derive(Debug, Clone)]
 pub struct AnimationController {
     animation: u8,
-    pub frame: u32,
+    pub frame: u8,
     speed: Duration,
     last_updated: Instant,
-    total_frames: u32,
+    total_frames: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnimationState<T> {
-    pub frame: u32,
-    pub current_animation: T,
+pub struct AnimationState {
+    pub frame: u8,
+    pub current_animation: u8,
 }
 
 impl AnimationController {
-    pub fn new(fps: u64, total_frames: u32) -> Self {
+    pub fn new(fps: u64, total_frames: u8) -> Self {
         let speed = Duration::from_millis(1000 / fps);
         Self {
             animation: 0,
@@ -209,7 +237,7 @@ pub enum ProjectileType {
     Fireball,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Projectile {
     projectile_type: ProjectileType,
     pub duration: Duration,
@@ -226,15 +254,5 @@ impl Projectile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectileState {
-    pub id: u32,
     projectile_type: ProjectileType,
-    owner: u32,
-    position: Vec2,
-    rotation: f32,
-}
-
-impl NetworkId for ProjectileState {
-    fn id(&self) -> u32 {
-        self.id
-    }
 }

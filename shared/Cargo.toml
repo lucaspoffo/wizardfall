@@ -8,5 +8,7 @@ edition = "2018"
 
 [dependencies]
 renet = { path = "../../renet" }
+derive = { path = "../derive" }
 serde = "1"
 glam = { version = "0.10", features = [ "serde" ] }
+shipyard = { git = "https://github.com/leudz/shipyard.git", rev = "a87e59e441d938bd7dc18bebf97456eff8707484", features = [ "serde1" ] }

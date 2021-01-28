@@ -107,11 +107,13 @@ fn server(ip: String) -> Result<(), RenetError> {
         world.run(update_players).unwrap();
         world.run(update_projectiles).unwrap();
 
-        world.run(debug::<Player>).unwrap();
-        world.run(debug::<PlayerInput>).unwrap();
-        world.run(debug::<Transform>).unwrap();
+        // world.run(debug::<Player>).unwrap();
+        // world.run(debug::<PlayerInput>).unwrap();
+        // world.run(debug::<Transform>).unwrap();
 
-        let server_frame = world.run(world_server_frame).unwrap();
+        let server_frame = ServerFrame::from_world(&world);
+        println!("{:?}", server_frame);
+        // let server_frame = world.run(world_server_frame).unwrap();
 
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
         println!("Server Frame Size: {} bytes", server_frame.len());
@@ -135,13 +137,6 @@ fn server(ip: String) -> Result<(), RenetError> {
         if let Some(wait) = (start + frame_duration).checked_duration_since(now) {
             sleep(wait);
         }
-    }
-}
-
-fn world_server_frame(player: View<Player>, projectiles: View<Projectile>) -> ServerFrame {
-    ServerFrame {
-        players: vec![],
-        projectiles: vec![],
     }
 }
 

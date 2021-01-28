@@ -159,6 +159,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -603,9 +612,11 @@ dependencies = [
 name = "shared"
 version = "0.1.0"
 dependencies = [
+ "derive",
  "glam",
  "renet",
  "serde",
+ "shipyard",
 ]
 
 [[package]]
@@ -617,6 +628,7 @@ dependencies = [
  "indexmap",
  "parking_lot",
  "rayon",
+ "serde",
 ]
 
 [[package]]
