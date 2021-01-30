@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
+// Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;
 
 pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
@@ -115,28 +116,21 @@ impl ServerFrame {
         world
             .run(|mut all_storages: AllStoragesViewMut| {
                 let removed_entities: Vec<EntityId> = {
-                    let entities = all_storages.borrow::<EntitiesView>().unwrap();
                     let mut mapping = all_storages
                         .borrow::<UniqueViewMut<EntityMapping>>()
                         .unwrap();
-                    entities
-                        .iter()
-                        .filter_map(|e| {
-                            if let Some(id) = mapping.get(&e).cloned() {
-                                if !self.entities.contains(&id) {
-                                    mapping.remove(&e)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
+                    let mut removed_entities: Vec<EntityId> = vec![];
+                    for (server_id, client_id) in mapping.clone().iter() {
+                        if !self.entities.contains(server_id) {
+                            removed_entities.push(*client_id);
+                            mapping.remove(server_id);
+                        }
+                    }    
+
+                    removed_entities
                 };
 
                 for id in removed_entities.iter() {
-                    println!("Removed entity {:?}", id);
                     all_storages.delete_entity(*id);
                 }
             })
