@@ -41,7 +41,9 @@ fn server(ip: String) -> Result<(), RenetError> {
     let world = World::new();
 
     world.add_unique(PlayerMapping::new()).unwrap();
-    world.add_unique(AnimationManager::<PlayerAnimations>::new()).unwrap();
+    world
+        .add_unique(AnimationManager::<PlayerAnimations>::new())
+        .unwrap();
 
     loop {
         let start = Instant::now();
@@ -50,15 +52,17 @@ fn server(ip: String) -> Result<(), RenetError> {
         for (client_id, messages) in server.get_messages_from_channel(0).iter() {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
-                world.run(
-                    |player_mapping: UniqueView<PlayerMapping>,
-                     entities: EntitiesView,
-                     mut inputs: ViewMut<PlayerInput>| {
-                        if let Some(entity_id) = player_mapping.get(client_id) {
-                            entities.add_component(*entity_id, &mut inputs, input);
-                        }
-                    },
-                ).unwrap();
+                world
+                    .run(
+                        |player_mapping: UniqueView<PlayerMapping>,
+                         entities: EntitiesView,
+                         mut inputs: ViewMut<PlayerInput>| {
+                            if let Some(entity_id) = player_mapping.get(client_id) {
+                                entities.add_component(*entity_id, &mut inputs, input);
+                            }
+                        },
+                    )
+                    .unwrap();
             }
         }
 
@@ -113,7 +117,6 @@ fn server(ip: String) -> Result<(), RenetError> {
 
         let server_frame = ServerFrame::from_world(&world);
         println!("{:?}", server_frame);
-        // let server_frame = world.run(world_server_frame).unwrap();
 
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
         println!("Server Frame Size: {} bytes", server_frame.len());
@@ -149,7 +152,7 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
         for (entity_id, (mut projectile, mut transform)) in
             (&mut projectiles, &mut transforms).iter().with_id()
         {
-            let direction = Vec2::new(transform.rotation.cos(), transform.rotation.sin());
+            let direction = Vec2::new(transform.rotation.cos(), -transform.rotation.sin());
             transform.position.x += direction.x * 4.0;
             transform.position.y += direction.y * 4.0;
             projectile.duration = projectile
@@ -229,6 +232,7 @@ fn remove_player(client_id: u64, mut all_storages: AllStoragesViewMut) {
     }
 }
 
+#[allow(dead_code)]
 fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
     for entity in view.iter() {
         println!("{:?}", entity);

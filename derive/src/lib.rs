@@ -6,4 +6,3 @@ use network_state::network_state_impl;
 pub fn network_state_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     network_state_impl(input)
 }
-

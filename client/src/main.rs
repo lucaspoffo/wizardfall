@@ -1,8 +1,8 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels, CastTarget, NetworkId, NetworkState, Player, PlayerAction, PlayerAnimations,
-    PlayerInput, Projectile, ServerFrame,
+    channels, CastTarget, EntityMapping, NetworkId, NetworkState, Player, PlayerAction,
+    PlayerAnimations, PlayerInput, Projectile, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -23,11 +23,9 @@ struct App {
     id: u32,
     world: World,
     connection: ClientConnected,
-    entity_mapping: EntityMapping,
 }
 
 type PlayerTexture = HashMap<PlayerAnimations, TextureAnimation>;
-type EntityMapping = HashMap<u32, EntityId>;
 
 struct TextureAnimation {
     texture: Texture2D,
@@ -56,7 +54,6 @@ impl App {
             id,
             world,
             connection,
-            entity_mapping: HashMap::new(),
         }
     }
 
@@ -121,29 +118,18 @@ impl App {
         for payload in self.connection.receive_all_messages_from_channel(1).iter() {
             let server_frame: ServerFrame =
                 bincode::deserialize(payload).expect("Failed to deserialize state.");
-            /*
-            self.world
-                .run_with_data(
-                    update_network_state::<Player>,
-                    (&server_frame.players, &mut self.entity_mapping),
-                )
-                .unwrap();
 
-            self.world
-                .run_with_data(
-                    update_network_state::<Projectile>,
-                    (&server_frame.projectiles, &mut self.entity_mapping),
-                )
-                .unwrap();
-            */
+            server_frame.apply_in_world(&self.world);
         }
 
         // println!("{:?}", self.world);
         // self.world.run(debug::<Player>);
         // self.world.run(debug::<Projectile>);
+        // self.world.run(debug::<Transform>);
 
-        self.world.run(draw_players).unwrap();
+        // self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
+        self.world.run(draw_simple_players).unwrap();
     }
 }
 
@@ -160,6 +146,10 @@ async fn main() {
     let id = rand::rand() as u32;
     let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
     let mut app = App::new(id, connection);
+
+    let mapping: EntityMapping = HashMap::new();
+    app.world.add_unique(mapping).unwrap();
+
     app.load_texture().await;
 
     loop {
@@ -270,22 +260,21 @@ fn draw_players(player_texture: UniqueView<PlayerTexture>, players: View<Player>
     */
 }
 
-fn draw_projectiles(projectiles: View<Projectile>) {
-    /*
-    for projectile in projectiles.iter() {
-        draw_rectangle(
-            projectile.position.x,
-            projectile.position.y,
-            16.0,
-            16.0,
-            RED,
-        );
+fn draw_simple_players(players: View<Player>, transform: View<Transform>) {
+    for (_, transform) in (&players, &transform).iter() {
+        draw_rectangle(transform.position.x, transform.position.y, 16.0, 16.0, BLUE);
     }
-    */
 }
 
+fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
+    for (_, transform) in (&projectiles, &transform).iter() {
+        draw_rectangle(transform.position.x, transform.position.y, 16.0, 16.0, RED);
+    }
+}
+
+#[allow(dead_code)]
 fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
-    for entity in view.iter() {
-        println!("{:?}", entity);
+    for (entity_id, component) in view.iter().with_id() {
+        println!("[Debug] {:?}: {:?}", entity_id, component);
     }
 }
