@@ -1,6 +1,6 @@
 use shared::{
-    channels, AnimationController, AnimationManager, Player, PlayerAction, PlayerAnimations,
-    PlayerInput, Projectile, ProjectileType, ServerFrame, Transform,
+    channels, Animation, AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput,
+    Projectile, ProjectileType, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -41,9 +41,6 @@ fn server(ip: String) -> Result<(), RenetError> {
     let world = World::new();
 
     world.add_unique(PlayerMapping::new()).unwrap();
-    world
-        .add_unique(AnimationManager::<PlayerAnimations>::new())
-        .unwrap();
 
     loop {
         let start = Instant::now();
@@ -107,7 +104,8 @@ fn server(ip: String) -> Result<(), RenetError> {
                 }
             }
         }
-
+        
+        world.run(update_animations).unwrap();
         world.run(update_players).unwrap();
         world.run(update_projectiles).unwrap();
 
@@ -143,6 +141,12 @@ fn server(ip: String) -> Result<(), RenetError> {
     }
 }
 
+fn update_animations(mut animations_controller: ViewMut<AnimationController>) {
+    for mut animation_controller in (&mut animations_controller).iter() {
+        animation_controller.update();
+    }
+}
+
 fn update_projectiles(mut all_storages: AllStoragesViewMut) {
     let mut remove = vec![];
     {
@@ -174,7 +178,6 @@ fn update_players(
     inputs: View<PlayerInput>,
     mut transforms: ViewMut<Transform>,
     mut animations: ViewMut<AnimationController>,
-    player_animations: UniqueView<AnimationManager<PlayerAnimations>>,
 ) {
     for (_, input, mut transform, mut animation) in
         (&players, &inputs, &mut transforms, &mut animations).iter()
@@ -190,13 +193,9 @@ fn update_players(
         }
 
         if input.right ^ input.left || input.down ^ input.up {
-            animation.change_animation(
-                player_animations.get_animation_controller(&PlayerAnimations::Run),
-            );
+            animation.change_animation(PlayerAnimation::Run.into());
         } else {
-            animation.change_animation(
-                player_animations.get_animation_controller(&PlayerAnimations::Idle),
-            );
+            animation.change_animation(PlayerAnimation::Idle.into());
         }
     }
 }
@@ -208,11 +207,10 @@ fn create_player(
     mut players: ViewMut<Player>,
     mut animations: ViewMut<AnimationController>,
     mut player_mapping: UniqueViewMut<PlayerMapping>,
-    player_animations: UniqueView<AnimationManager<PlayerAnimations>>,
 ) {
     let player = Player::new(client_id);
     let transform = Transform::default();
-    let animation = player_animations.get_animation_controller(&PlayerAnimations::Idle);
+    let animation = PlayerAnimation::Idle.get_animation_controller();
 
     let entity_id = entities.add_entity(
         (&mut players, &mut transforms, &mut animations),

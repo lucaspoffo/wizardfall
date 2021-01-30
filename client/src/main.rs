@@ -1,8 +1,8 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels, CastTarget, EntityMapping, NetworkId, NetworkState, Player, PlayerAction,
-    PlayerAnimations, PlayerInput, Projectile, ServerFrame, Transform,
+    channels, Animation, AnimationController, CastTarget, EntityMapping, NetworkId, NetworkState,
+    Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -25,18 +25,18 @@ struct App {
     connection: ClientConnected,
 }
 
-type PlayerTexture = HashMap<PlayerAnimations, TextureAnimation>;
+type AnimationTexture = HashMap<Animation, TextureAnimation>;
 
 struct TextureAnimation {
     texture: Texture2D,
     width: u32,
     height: u32,
-    h_frames: u32,
-    v_frames: u32,
+    h_frames: u8,
+    v_frames: u8,
 }
 
 impl TextureAnimation {
-    pub fn new(texture: Texture2D, width: u32, height: u32, h_frames: u32, v_frames: u32) -> Self {
+    pub fn new(texture: Texture2D, width: u32, height: u32, h_frames: u8, v_frames: u8) -> Self {
         Self {
             texture,
             width,
@@ -58,15 +58,15 @@ impl App {
     }
 
     async fn load_texture(&mut self) {
-        let mut animations = HashMap::new();
+        let mut animations: AnimationTexture = HashMap::new();
         let idle_texture: Texture2D = load_texture("Blue_witch/B_witch_idle.png").await;
         let run_texture: Texture2D = load_texture("Blue_witch/B_witch_run.png").await;
 
         let idle_animation = TextureAnimation::new(idle_texture, 32, 48, 1, 6);
         let run_animation = TextureAnimation::new(run_texture, 32, 48, 1, 8);
 
-        animations.insert(PlayerAnimations::Idle, idle_animation);
-        animations.insert(PlayerAnimations::Run, run_animation);
+        animations.insert(PlayerAnimation::Idle.into(), idle_animation);
+        animations.insert(PlayerAnimation::Run.into(), run_animation);
         self.world.add_unique(animations).unwrap();
     }
 
@@ -128,8 +128,8 @@ impl App {
         // self.world.run(debug::<Transform>);
 
         // self.world.run(draw_players).unwrap();
+        self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
-        self.world.run(draw_simple_players).unwrap();
     }
 }
 
@@ -227,15 +227,19 @@ fn update_network_state<T: NetworkState + 'static + Send + Sync>(
 }
 */
 
-fn draw_players(player_texture: UniqueView<PlayerTexture>, players: View<Player>) {
-    /*
-    for player in players.iter() {
-        let current_animation = &player.animation_manager.current_animation;
-        let texture_animation = player_texture.get(current_animation).unwrap();
+fn draw_players(
+    player_texture: UniqueView<AnimationTexture>,
+    players: View<Player>,
+    transforms: View<Transform>,
+    animation_controller: View<AnimationController>,
+) {
+    for (player, transform, animation_controller) in (&players, &transforms, &animation_controller).iter() {
+        let texture_animation = player_texture.get(&animation_controller.animation).unwrap();
 
-        let ac = player.animation_manager.current_animation_controller();
-        let texture_x = ac.frame % texture_animation.h_frames * texture_animation.width;
-        let texture_y = ac.frame / texture_animation.h_frames * texture_animation.height;
+        let texture_x = (animation_controller.frame % texture_animation.h_frames) as u32
+            * texture_animation.width;
+        let texture_y = (animation_controller.frame / texture_animation.h_frames) as u32
+            * texture_animation.height;
         let draw_rect = Rect::new(
             texture_x as f32,
             texture_y as f32,
@@ -243,13 +247,13 @@ fn draw_players(player_texture: UniqueView<PlayerTexture>, players: View<Player>
             texture_animation.height as f32,
         );
 
-        let mut x = player.position.x;
-        let y = player.position.y;
+        let mut x = transform.position.x;
+        let y = transform.position.y;
 
         let mut params = DrawTextureParams::default();
         params.source = Some(draw_rect);
         let mut x_size = texture_animation.width as f32;
-        if player.animation_manager.h_flip {
+        if player.direction.angle_between(Vec2::unit_x()) < std::f32::consts::PI {
             x_size *= -1.0;
             x += texture_animation.width as f32;
         }
@@ -257,7 +261,6 @@ fn draw_players(player_texture: UniqueView<PlayerTexture>, players: View<Player>
 
         draw_texture_ex(texture_animation.texture, x, y, WHITE, params)
     }
-    */
 }
 
 fn draw_simple_players(players: View<Player>, transform: View<Transform>) {

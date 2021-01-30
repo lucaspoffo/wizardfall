@@ -69,11 +69,12 @@ impl Transform {
 #[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Player {
     pub client_id: u64,
+    pub direction: Vec2,
 }
 
 impl Player {
     pub fn new(client_id: u64) -> Self {
-        Self { client_id }
+        Self { client_id, direction: Vec2::zero() }
     }
 }
 
@@ -91,6 +92,7 @@ pub struct ServerFrame {
     players: NetworkComponent<Player>,
     projectiles: NetworkComponent<Projectile>,
     transforms: NetworkComponent<Transform>,
+    animations: NetworkComponent<AnimationController>,
 }
 
 impl ServerFrame {
@@ -103,6 +105,7 @@ impl ServerFrame {
             players: NetworkComponent::<Player>::from_world(&entities, world),
             projectiles: NetworkComponent::<Projectile>::from_world(&entities, world),
             transforms: NetworkComponent::<Transform>::from_world(&entities, world),
+            animations: NetworkComponent::<AnimationController>::from_world(&entities, world),
             entities,
         }
     }
@@ -111,6 +114,7 @@ impl ServerFrame {
         self.players.apply_in_world(&self.entities, world);
         self.projectiles.apply_in_world(&self.entities, world);
         self.transforms.apply_in_world(&self.entities, world);
+        self.animations.apply_in_world(&self.entities, world);
 
         // Remove entities that are not in the network frame
         world
@@ -125,7 +129,7 @@ impl ServerFrame {
                             removed_entities.push(*client_id);
                             mapping.remove(server_id);
                         }
-                    }    
+                    }
 
                     removed_entities
                 };
@@ -207,7 +211,7 @@ pub enum Messages {
 
 #[derive(Debug, Clone)]
 pub struct AnimationController {
-    animation: u8,
+    pub animation: Animation,
     pub frame: u8,
     speed: Duration,
     last_updated: Instant,
@@ -217,14 +221,36 @@ pub struct AnimationController {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationState {
     pub frame: u8,
-    pub current_animation: u8,
+    pub current_animation: Animation,
+}
+
+impl NetworkState for AnimationController {
+    type State = AnimationState;
+
+    fn from_state(state: Self::State) -> Self {
+        let mut animation_controller = state.current_animation.get_animation_controller();
+        animation_controller.frame = state.frame;
+        animation_controller
+    }
+
+    fn update_from_state(&mut self, state: Self::State) {
+        self.change_animation(state.current_animation);
+        self.frame = state.frame;
+    }
+
+    fn state(&self) -> AnimationState {
+        AnimationState {
+            current_animation: self.animation.clone(),
+            frame: self.frame,
+        }
+    }
 }
 
 impl AnimationController {
-    pub fn new(fps: u64, total_frames: u8) -> Self {
+    pub fn new(fps: u64, total_frames: u8, animation: Animation) -> Self {
         let speed = Duration::from_millis(1000 / fps);
         Self {
-            animation: 0,
+            animation,
             speed,
             total_frames,
             frame: 0,
@@ -232,15 +258,16 @@ impl AnimationController {
         }
     }
 
-    pub fn change_animation(&mut self, animation: AnimationController) {
-        if self.animation == animation.animation {
+    pub fn change_animation(&mut self, animation: Animation) {
+        if self.animation == animation {
             return;
         }
-        self.animation = animation.animation;
+        let animation_controller = animation.get_animation_controller();
+        self.animation = animation_controller.animation;
         self.frame = 0;
-        self.speed = animation.speed;
+        self.speed = animation_controller.speed;
         self.last_updated = Instant::now();
-        self.total_frames = animation.total_frames;
+        self.total_frames = animation_controller.total_frames;
     }
 
     pub fn update(&mut self) {
@@ -259,31 +286,42 @@ impl AnimationController {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-pub enum PlayerAnimations {
+pub enum PlayerAnimation {
     Idle,
     Run,
 }
 
-#[derive(Debug)]
-pub struct AnimationManager<T> {
-    animations: HashMap<T, AnimationController>,
-}
-
-impl<T: Eq + Hash + Clone> AnimationManager<T> {
-    pub fn get_animation_controller(&self, animation: &T) -> AnimationController {
-        let animation = self.animations.get(animation).unwrap();
-        (*animation).clone()
+impl Into<Animation> for PlayerAnimation {
+    fn into(self) -> Animation {
+        Animation::PlayerAnimation(self)
     }
 }
 
-impl AnimationManager<PlayerAnimations> {
-    pub fn new() -> Self {
-        let mut animations = HashMap::new();
-        let idle = AnimationController::new(13, 6);
-        let run = AnimationController::new(13, 8);
-        animations.insert(PlayerAnimations::Idle, idle);
-        animations.insert(PlayerAnimations::Run, run);
-        Self { animations }
+impl PlayerAnimation {
+    pub fn get_animation_controller(&self) -> AnimationController {
+        match self {
+            PlayerAnimation::Idle => {
+                AnimationController::new(13, 6, Animation::PlayerAnimation(PlayerAnimation::Idle))
+            }
+            PlayerAnimation::Run => {
+                AnimationController::new(13, 8, Animation::PlayerAnimation(PlayerAnimation::Run))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Animation {
+    PlayerAnimation(PlayerAnimation),
+}
+
+impl Animation {
+    pub fn get_animation_controller(&self) -> AnimationController {
+        match self {
+            Animation::PlayerAnimation(player_animation) => {
+                player_animation.get_animation_controller()
+            }
+        }
     }
 }
 
