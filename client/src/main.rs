@@ -1,8 +1,8 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels, Animation, AnimationController, CastTarget, EntityMapping, NetworkId, NetworkState,
-    Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile, ServerFrame, Transform,
+    channels, Animation, AnimationController, CastTarget, EntityMapping, Player, PlayerAction,
+    PlayerAnimation, PlayerInput, Projectile, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -184,48 +184,6 @@ fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
         sleep(Duration::from_millis(20));
     }
 }
-/*
-fn update_network_state<T: NetworkState + 'static + Send + Sync>(
-    (entities_state, entity_mapping): (&[T::State], &mut EntityMapping),
-    mut all_storages: AllStoragesViewMut,
-) {
-    let removed_entities: Vec<EntityId> = {
-        let mut entities = all_storages.borrow::<EntitiesViewMut>().unwrap();
-        let mut network_entities = all_storages.borrow::<ViewMut<T>>().unwrap();
-
-        for state in entities_state.iter() {
-            let entity_id = entity_mapping.entry(state.id()).or_insert_with(|| {
-                let entity = T::from_state(state);
-                entities.add_entity(&mut network_entities, entity)
-            });
-            if let Ok(mut entity) = (&mut network_entities).get(*entity_id) {
-                entity.update_from_state(&state);
-            }
-        }
-
-        let network_entities_id: Vec<u32> = entities_state.iter().map(|p| p.id()).collect();
-
-        let removed_id: Vec<u32> = network_entities
-            .iter()
-            .filter(|entity| !network_entities_id.contains(&entity.id()))
-            .map(|entity| entity.id())
-            .collect();
-
-        let mut removed = vec![];
-
-        for id in removed_id {
-            if let Some(entity_id) = entity_mapping.remove(&id) {
-                removed.push(entity_id);
-            }
-        }
-        removed
-    };
-
-    for id in removed_entities {
-        all_storages.delete_entity(id);
-    }
-}
-*/
 
 fn draw_players(
     player_texture: UniqueView<AnimationTexture>,
@@ -233,8 +191,17 @@ fn draw_players(
     transforms: View<Transform>,
     animation_controller: View<AnimationController>,
 ) {
-    for (player, transform, animation_controller) in (&players, &transforms, &animation_controller).iter() {
+    for (player, transform, animation_controller) in
+        (&players, &transforms, &animation_controller).iter()
+    {
         let texture_animation = player_texture.get(&animation_controller.animation).unwrap();
+        if animation_controller.frame > texture_animation.h_frames * texture_animation.v_frames {
+            println!(
+                "Invalid animation frame {} for texture player",
+                animation_controller.frame
+            );
+            continue;
+        }
 
         let texture_x = (animation_controller.frame % texture_animation.h_frames) as u32
             * texture_animation.width;
@@ -260,12 +227,6 @@ fn draw_players(
         params.dest_size = Some(vec2(x_size, texture_animation.height as f32));
 
         draw_texture_ex(texture_animation.texture, x, y, WHITE, params)
-    }
-}
-
-fn draw_simple_players(players: View<Player>, transform: View<Transform>) {
-    for (_, transform) in (&players, &transform).iter() {
-        draw_rectangle(transform.position.x, transform.position.y, 16.0, 16.0, BLUE);
     }
 }
 

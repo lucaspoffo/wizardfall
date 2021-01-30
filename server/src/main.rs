@@ -1,6 +1,6 @@
 use shared::{
-    channels, Animation, AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput,
-    Projectile, ProjectileType, ServerFrame, Transform,
+    channels, AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile,
+    ProjectileType, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -45,7 +45,7 @@ fn server(ip: String) -> Result<(), RenetError> {
     loop {
         let start = Instant::now();
 
-        server.update(start.clone());
+        server.update(start);
         for (client_id, messages) in server.get_messages_from_channel(0).iter() {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
@@ -104,7 +104,7 @@ fn server(ip: String) -> Result<(), RenetError> {
                 }
             }
         }
-        
+
         world.run(update_animations).unwrap();
         world.run(update_players).unwrap();
         world.run(update_projectiles).unwrap();
@@ -162,7 +162,7 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
             projectile.duration = projectile
                 .duration
                 .checked_sub(Duration::from_micros(16666))
-                .unwrap_or(Duration::from_micros(0));
+                .unwrap_or_else(|| Duration::from_micros(0));
             if projectile.duration.as_nanos() == 0 {
                 remove.push(entity_id);
             }
@@ -223,7 +223,7 @@ fn create_player(
 fn remove_player(client_id: u64, mut all_storages: AllStoragesViewMut) {
     let player_entity_id = {
         let player_mapping = all_storages.borrow::<UniqueView<PlayerMapping>>().unwrap();
-        player_mapping.get(&client_id).map(|id| id.clone())
+        player_mapping.get(&client_id).copied()
     };
     if let Some(entity_id) = player_entity_id {
         all_storages.delete_entity(entity_id);

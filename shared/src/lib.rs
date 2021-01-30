@@ -18,11 +18,15 @@ use std::time::{Duration, Instant};
 pub type EntityMapping = HashMap<EntityId, EntityId>;
 
 pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
-    let mut reliable_config = ReliableOrderedChannelConfig::default();
-    reliable_config.message_resend_time = Duration::from_millis(100);
+    let reliable_config = ReliableOrderedChannelConfig {
+        message_resend_time: Duration::from_millis(100),
+        ..Default::default()
+    };
 
-    let mut player_action_channel = ReliableOrderedChannelConfig::default();
-    player_action_channel.message_resend_time = Duration::from_millis(0);
+    let player_action_channel = ReliableOrderedChannelConfig {
+        message_resend_time: Duration::from_millis(0),
+        ..Default::default()
+    };
 
     let unreliable_config = UnreliableUnorderedChannelConfig::default();
 
@@ -31,10 +35,6 @@ pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
     channels_config.insert(1, Box::new(unreliable_config));
     channels_config.insert(2, Box::new(player_action_channel));
     channels_config
-}
-
-pub trait NetworkId {
-    fn id(&self) -> u32;
 }
 
 pub trait NetworkState {
@@ -74,7 +74,10 @@ pub struct Player {
 
 impl Player {
     pub fn new(client_id: u64) -> Self {
-        Self { client_id, direction: Vec2::zero() }
+        Self {
+            client_id,
+            direction: Vec2::zero(),
+        }
     }
 }
 
@@ -206,7 +209,7 @@ impl<T: 'static + Sync + Send + Clone + NetworkState> NetworkComponent<T> {
 
 pub enum Messages {
     PlayerInput(PlayerInput),
-    ServerFrame(ServerFrame),
+    ServerFrame(Box<ServerFrame>),
 }
 
 #[derive(Debug, Clone)]
@@ -274,7 +277,7 @@ impl AnimationController {
         let current_time = Instant::now();
         if current_time - self.last_updated > self.speed {
             self.frame += 1;
-            self.frame = self.frame % self.total_frames;
+            self.frame %= self.total_frames;
             self.last_updated = current_time;
         }
     }
