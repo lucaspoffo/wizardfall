@@ -1,9 +1,23 @@
 use macroquad::math::{vec2, Rect, Vec2};
 use shipyard::*;
 
-use super::Transform;
+use serde::{Deserialize, Serialize};
 
+use super::{Transform, NetworkState};
+use derive::NetworkState as NetworkStateDerive;
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "Rect")]
+struct RectDef {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, NetworkStateDerive)]
 pub struct CollisionShape {
+    #[serde(with = "RectDef")]
     pub rect: Rect,
 }
 
@@ -138,19 +152,19 @@ pub fn rect_rect_collision(
         expanded_size.y,
     );
 
-    let ray_origin = vec2(source.x + source.w / 2.0, source.y + source.w / 2.0);
+    let ray_origin = vec2(source.x + source.w / 2.0, source.y + source.h / 2.0);
 
     return ray_rect_collision(ray_origin, vel * delta_time, expanded_target);
 }
 
 pub fn load_level_collisions(world: &mut World) {
-    for i in 0..32 {
+    for i in 0..2 {
         let transform = Transform {
-            position: vec2(100.0 + i as f32 * 32.0, 100.0),
+            position: vec2(100.0 + i as f32 * 300.0, 100.0),
             rotation: 0.0,
         };
         let collision_shape = CollisionShape {
-            rect: Rect::new(100.0 + i as f32 * 32.0, 100.0, 32.0, 32.0),
+            rect: Rect::new(100.0 + i as f32 * 300.0, 100.0, 32.0, 300.0),
         };
         world.add_entity((collision_shape, transform));
     }

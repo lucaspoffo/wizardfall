@@ -15,6 +15,7 @@ use std::hash::Hash;
 use std::time::{Duration, Instant};
 
 pub mod physics;
+use physics::CollisionShape;
 
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;
@@ -99,6 +100,7 @@ pub struct ServerFrame {
     projectiles: NetworkComponent<Projectile>,
     transforms: NetworkComponent<Transform>,
     animations: NetworkComponent<AnimationController>,
+    collisions_shape: NetworkComponent<CollisionShape>,
 }
 
 impl ServerFrame {
@@ -112,6 +114,7 @@ impl ServerFrame {
             projectiles: NetworkComponent::<Projectile>::from_world(&entities, world),
             transforms: NetworkComponent::<Transform>::from_world(&entities, world),
             animations: NetworkComponent::<AnimationController>::from_world(&entities, world),
+            collisions_shape: NetworkComponent::<CollisionShape>::from_world(&entities, world),
             entities,
         }
     }
@@ -121,6 +124,7 @@ impl ServerFrame {
         self.projectiles.apply_in_world(&self.entities, world);
         self.transforms.apply_in_world(&self.entities, world);
         self.animations.apply_in_world(&self.entities, world);
+        self.collisions_shape.apply_in_world(&self.entities, world);
 
         // Remove entities that are not in the network frame
         world

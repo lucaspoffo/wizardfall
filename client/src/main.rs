@@ -4,7 +4,7 @@ use shared::{
     channels, Animation, AnimationController, CastTarget, EntityMapping,
     Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile, ServerFrame,
     Transform, 
-    physics::{Velocity, CollisionShape, calculate_collisions, update_position, sync_transform}
+    physics::CollisionShape
 };
 
 use alto_logger::TermLogger;
@@ -135,10 +135,9 @@ impl App {
         // self.world.run(draw_players).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
+        self.world.run(draw_collisions).unwrap();
     }
 }
-
-struct PlayerTest;
 
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {
@@ -159,66 +158,10 @@ async fn main() {
 
     app.load_texture().await;
 
-    let player = CollisionShape {
-        rect: Rect::new(0.0, 0.0, 50.0, 50.0),
-    };
-    let transform = Transform {
-        position: vec2(0.0, 0.0),
-        rotation: 0.0,
-    };
-    let velocity = Velocity(Vec2::zero());
-    app.world
-        .add_entity((player, PlayerTest, transform, velocity));
-
-    for i in 0..32 {
-        let transform = Transform {
-            position: vec2(100.0 + i as f32 * 32.0, 100.0),
-            rotation: 0.0,
-        };
-        let collision_shape = CollisionShape {
-            rect: Rect::new(100.0 + i as f32 * 32.0, 100.0, 32.0, 32.0),
-        };
-        app.world.add_entity((collision_shape, transform));
-    }
-
     loop {
         clear_background(BLACK);
 
         app.update().await;
-
-        app.world
-            .run(
-                |players: View<PlayerTest>,
-                 mut velocities: ViewMut<Velocity>,
-                 transforms: View<Transform>| {
-                    for (transform, mut velocity, _) in
-                        (&transforms, &mut velocities, &players).iter()
-                    {
-                        if is_mouse_button_down(MouseButton::Left) {
-                            let vel = {
-                                let mouse_pos: Vec2 = mouse_position().into();
-                                let result = (mouse_pos
-                                    - vec2(transform.position.x, transform.position.y))
-                                .normalize()
-                                    * 100.0;
-                                if result.is_nan().any() {
-                                    Vec2::zero()
-                                } else {
-                                    result
-                                }
-                            };
-                            velocity.0.x = vel.x;
-                            velocity.0.y = vel.y;
-                        }
-                    }
-                },
-            )
-            .unwrap();
-
-        app.world.run(sync_transform).unwrap();
-        app.world.run(draw_collisions).unwrap();
-        app.world.run_with_data(calculate_collisions, get_frame_time()).unwrap();
-        app.world.run_with_data(update_position, get_frame_time()).unwrap();
 
         next_frame().await
     }
@@ -330,12 +273,13 @@ fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
 
 fn draw_collisions(collision_shapes: View<CollisionShape>) {
     for collision_shape in collision_shapes.iter() {
-        draw_rectangle(
+        draw_rectangle_lines(
             collision_shape.rect.x,
             collision_shape.rect.y,
             collision_shape.rect.w,
             collision_shape.rect.h,
-            WHITE,
+            1.0,
+            GREEN,
         );
     }
 }

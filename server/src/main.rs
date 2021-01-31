@@ -228,7 +228,7 @@ fn create_player(
     let transform = Transform::default();
     let animation = PlayerAnimation::Idle.get_animation_controller();
     let collision_shape = CollisionShape {
-        rect: Rect::new(transform.position.x, transform.position.y, 16.0, 16.0),
+        rect: Rect::new(transform.position.x, transform.position.y, 32.0, 48.0),
     };
     let velocity = Velocity(Vec2::zero());
 
