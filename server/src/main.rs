@@ -1,6 +1,11 @@
 use shared::{
-    channels, AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile,
-    ProjectileType, ServerFrame, Transform,
+    channels,
+    physics::{
+        calculate_collisions, load_level_collisions, sync_transform, update_position,
+        CollisionShape, Velocity,
+    },
+    AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile,
+    ProjectileType, Rect, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -38,9 +43,10 @@ fn server(ip: String) -> Result<(), RenetError> {
     let mut server: Server<UnsecureServerProtocol> =
         Server::new(socket, server_config, endpoint_config, channels())?;
 
-    let world = World::new();
+    let mut world = World::new();
 
     world.add_unique(PlayerMapping::new()).unwrap();
+    load_level_collisions(&mut world);
 
     loop {
         let start = Instant::now();
@@ -109,6 +115,10 @@ fn server(ip: String) -> Result<(), RenetError> {
         world.run(update_players).unwrap();
         world.run(update_projectiles).unwrap();
 
+        world.run(sync_transform).unwrap();
+        world.run_with_data(calculate_collisions, 0.016666).unwrap();
+        world.run_with_data(update_position, 0.016666).unwrap();
+
         // world.run(debug::<Player>).unwrap();
         // world.run(debug::<PlayerInput>).unwrap();
         // world.run(debug::<Transform>).unwrap();
@@ -174,23 +184,27 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
 }
 
 fn update_players(
-    players: View<Player>,
+    mut players: ViewMut<Player>,
     inputs: View<PlayerInput>,
-    mut transforms: ViewMut<Transform>,
+    mut velocities: ViewMut<Velocity>,
     mut animations: ViewMut<AnimationController>,
 ) {
-    for (_, input, mut transform, mut animation) in
-        (&players, &inputs, &mut transforms, &mut animations).iter()
+    for (mut player, input, mut velocity, mut animation) in
+        (&mut players, &inputs, &mut velocities, &mut animations).iter()
     {
         let x = (input.right as i8 - input.left as i8) as f32;
         let y = (input.down as i8 - input.up as i8) as f32;
-        let mut direction = vec2(x, y);
+        let mut movement_direction = vec2(x, y);
 
-        if direction.length() != 0.0 {
-            direction = direction.normalize();
-            transform.position.x += direction.x * 4.0;
-            transform.position.y += direction.y * 4.0;
+        if movement_direction.length() != 0.0 {
+            movement_direction = movement_direction.normalize();
+            velocity.0.x = movement_direction.x * 300.0;
+            velocity.0.y = movement_direction.y * 300.0;
+        } else {
+            velocity.0 = Vec2::zero();
         }
+
+        player.direction = input.direction;
 
         if input.right ^ input.left || input.down ^ input.up {
             animation.change_animation(PlayerAnimation::Run.into());
@@ -205,16 +219,28 @@ fn create_player(
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
     mut players: ViewMut<Player>,
+    mut collisions_shape: ViewMut<CollisionShape>,
     mut animations: ViewMut<AnimationController>,
+    mut velocities: ViewMut<Velocity>,
     mut player_mapping: UniqueViewMut<PlayerMapping>,
 ) {
     let player = Player::new(client_id);
     let transform = Transform::default();
     let animation = PlayerAnimation::Idle.get_animation_controller();
+    let collision_shape = CollisionShape {
+        rect: Rect::new(transform.position.x, transform.position.y, 16.0, 16.0),
+    };
+    let velocity = Velocity(Vec2::zero());
 
     let entity_id = entities.add_entity(
-        (&mut players, &mut transforms, &mut animations),
-        (player, transform, animation),
+        (
+            &mut players,
+            &mut transforms,
+            &mut animations,
+            &mut collisions_shape,
+            &mut velocities,
+        ),
+        (player, transform, animation, collision_shape, velocity),
     );
 
     player_mapping.insert(client_id, entity_id);

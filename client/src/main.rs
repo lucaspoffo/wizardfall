@@ -1,8 +1,10 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels, Animation, AnimationController, CastTarget, EntityMapping, Player, PlayerAction,
-    PlayerAnimation, PlayerInput, Projectile, ServerFrame, Transform,
+    channels, Animation, AnimationController, CastTarget, EntityMapping,
+    Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile, ServerFrame,
+    Transform, 
+    physics::{Velocity, CollisionShape, calculate_collisions, update_position, sync_transform}
 };
 
 use alto_logger::TermLogger;
@@ -20,7 +22,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct App {
-    id: u32,
+    id: u64,
     world: World,
     connection: ClientConnected,
 }
@@ -48,7 +50,7 @@ impl TextureAnimation {
 }
 
 impl App {
-    fn new(id: u32, connection: ClientConnected) -> Self {
+    fn new(id: u64, connection: ClientConnected) -> Self {
         let world = World::new();
         Self {
             id,
@@ -76,11 +78,14 @@ impl App {
         let left = is_key_down(KeyCode::A) || is_key_down(KeyCode::Left);
         let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
 
+        let direction = self.world.run_with_data(player_direction, self.id).unwrap();
+
         let input = PlayerInput {
             up,
             down,
             left,
             right,
+            direction,
         };
 
         if is_mouse_button_pressed(MouseButton::Left) {
@@ -133,6 +138,8 @@ impl App {
     }
 }
 
+struct PlayerTest;
+
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {
     TermLogger::default().init().unwrap();
@@ -143,7 +150,7 @@ async fn main() {
             .as_secs(),
     );
 
-    let id = rand::rand() as u32;
+    let id = rand::rand() as u64;
     let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
     let mut app = App::new(id, connection);
 
@@ -152,10 +159,66 @@ async fn main() {
 
     app.load_texture().await;
 
+    let player = CollisionShape {
+        rect: Rect::new(0.0, 0.0, 50.0, 50.0),
+    };
+    let transform = Transform {
+        position: vec2(0.0, 0.0),
+        rotation: 0.0,
+    };
+    let velocity = Velocity(Vec2::zero());
+    app.world
+        .add_entity((player, PlayerTest, transform, velocity));
+
+    for i in 0..32 {
+        let transform = Transform {
+            position: vec2(100.0 + i as f32 * 32.0, 100.0),
+            rotation: 0.0,
+        };
+        let collision_shape = CollisionShape {
+            rect: Rect::new(100.0 + i as f32 * 32.0, 100.0, 32.0, 32.0),
+        };
+        app.world.add_entity((collision_shape, transform));
+    }
+
     loop {
         clear_background(BLACK);
 
         app.update().await;
+
+        app.world
+            .run(
+                |players: View<PlayerTest>,
+                 mut velocities: ViewMut<Velocity>,
+                 transforms: View<Transform>| {
+                    for (transform, mut velocity, _) in
+                        (&transforms, &mut velocities, &players).iter()
+                    {
+                        if is_mouse_button_down(MouseButton::Left) {
+                            let vel = {
+                                let mouse_pos: Vec2 = mouse_position().into();
+                                let result = (mouse_pos
+                                    - vec2(transform.position.x, transform.position.y))
+                                .normalize()
+                                    * 100.0;
+                                if result.is_nan().any() {
+                                    Vec2::zero()
+                                } else {
+                                    result
+                                }
+                            };
+                            velocity.0.x = vel.x;
+                            velocity.0.y = vel.y;
+                        }
+                    }
+                },
+            )
+            .unwrap();
+
+        app.world.run(sync_transform).unwrap();
+        app.world.run(draw_collisions).unwrap();
+        app.world.run_with_data(calculate_collisions, get_frame_time()).unwrap();
+        app.world.run_with_data(update_position, get_frame_time()).unwrap();
 
         next_frame().await
     }
@@ -214,19 +277,30 @@ fn draw_players(
             texture_animation.height as f32,
         );
 
-        let mut x = transform.position.x;
+        let x = transform.position.x;
         let y = transform.position.y;
 
         let mut params = DrawTextureParams::default();
         params.source = Some(draw_rect);
         let mut x_size = texture_animation.width as f32;
-        if player.direction.angle_between(Vec2::unit_x()) < std::f32::consts::PI {
+        let mut draw_x = x;
+        if player.direction.angle_between(Vec2::unit_x()).abs() > std::f32::consts::PI / 2.0 {
             x_size *= -1.0;
-            x += texture_animation.width as f32;
+            draw_x += texture_animation.width as f32;
         }
         params.dest_size = Some(vec2(x_size, texture_animation.height as f32));
 
-        draw_texture_ex(texture_animation.texture, x, y, WHITE, params)
+        draw_texture_ex(texture_animation.texture, draw_x, y, WHITE, params);
+
+        let center_x = x + (texture_animation.width as f32 / 2.0);
+        let center_y = y + 4.0 + (texture_animation.height as f32 / 2.0);
+
+        let wand_size = 12.0;
+        let wand_x = center_x + player.direction.x * wand_size;
+        let wand_y = center_y + player.direction.y * wand_size;
+
+        draw_line(center_x, center_y, wand_x, wand_y, 3.0, YELLOW);
+        draw_circle(wand_x, wand_y, 3.0, RED);
     }
 }
 
@@ -236,9 +310,32 @@ fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     }
 }
 
+fn player_direction(client_id: u64, players: View<Player>, transforms: View<Transform>) -> Vec2 {
+    for (player, transform) in (&players, &transforms).iter() {
+        if player.client_id == client_id {
+            let mouse_pos: Vec2 = mouse_position().into();
+            return (mouse_pos - transform.position).normalize();
+        }
+    }
+
+    Vec2::unit_x()
+}
+
 #[allow(dead_code)]
 fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
     for (entity_id, component) in view.iter().with_id() {
         println!("[Debug] {:?}: {:?}", entity_id, component);
+    }
+}
+
+fn draw_collisions(collision_shapes: View<CollisionShape>) {
+    for collision_shape in collision_shapes.iter() {
+        draw_rectangle(
+            collision_shape.rect.x,
+            collision_shape.rect.y,
+            collision_shape.rect.w,
+            collision_shape.rect.h,
+            WHITE,
+        );
     }
 }

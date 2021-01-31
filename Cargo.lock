@@ -614,6 +614,7 @@ version = "0.1.0"
 dependencies = [
  "derive",
  "glam",
+ "macroquad",
  "renet",
  "serde",
  "shipyard",

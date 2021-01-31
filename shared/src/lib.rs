@@ -1,6 +1,5 @@
 use derive::NetworkState;
 
-use glam::{vec2, Vec2};
 use renet::channel::{
     ChannelConfig, ReliableOrderedChannelConfig, UnreliableUnorderedChannelConfig,
 };
@@ -10,9 +9,12 @@ use shipyard::{
     UniqueViewMut, View, ViewMut, World,
 };
 
+pub use macroquad::math::{vec2, Rect, Vec2};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::{Duration, Instant};
+
+pub mod physics;
 
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;
@@ -87,6 +89,7 @@ pub struct PlayerInput {
     pub down: bool,
     pub left: bool,
     pub right: bool,
+    pub direction: Vec2,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
