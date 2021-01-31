@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 pub mod physics;
 use physics::CollisionShape;
 
+pub mod ldtk;
+
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;
 

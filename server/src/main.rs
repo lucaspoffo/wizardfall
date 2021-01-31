@@ -1,9 +1,10 @@
 use shared::{
     channels,
     physics::{
-        calculate_collisions, load_level_collisions, sync_transform, update_position,
+        calculate_collisions, sync_transform, update_position,
         CollisionShape, Velocity,
     },
+    ldtk::load_level_collisions,
     AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile,
     ProjectileType, Rect, ServerFrame, Transform,
 };
@@ -44,9 +45,9 @@ fn server(ip: String) -> Result<(), RenetError> {
         Server::new(socket, server_config, endpoint_config, channels())?;
 
     let mut world = World::new();
+    // load_level_collisions(&mut world);
 
     world.add_unique(PlayerMapping::new()).unwrap();
-    load_level_collisions(&mut world);
 
     loop {
         let start = Instant::now();
@@ -124,10 +125,10 @@ fn server(ip: String) -> Result<(), RenetError> {
         // world.run(debug::<Transform>).unwrap();
 
         let server_frame = ServerFrame::from_world(&world);
-        println!("{:?}", server_frame);
+        // println!("{:?}", server_frame);
 
         let server_frame = serialize(&server_frame).expect("Failed to serialize state");
-        println!("Server Frame Size: {} bytes", server_frame.len());
+        // println!("Server Frame Size: {} bytes", server_frame.len());
 
         server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
         server.send_packets();

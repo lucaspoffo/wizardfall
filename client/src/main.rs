@@ -4,7 +4,8 @@ use shared::{
     channels, Animation, AnimationController, CastTarget, EntityMapping,
     Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile, ServerFrame,
     Transform, 
-    physics::CollisionShape
+    physics::CollisionShape,
+    ldtk::{load_project_and_assets, draw_level, load_level_collisions}
 };
 
 use alto_logger::TermLogger;
@@ -133,6 +134,7 @@ impl App {
         // self.world.run(debug::<Transform>);
 
         // self.world.run(draw_players).unwrap();
+        self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
         self.world.run(draw_collisions).unwrap();
@@ -157,6 +159,9 @@ async fn main() {
     app.world.add_unique(mapping).unwrap();
 
     app.load_texture().await;
+
+    load_project_and_assets(&app.world).await;
+    load_level_collisions(&mut app.world);
 
     loop {
         clear_background(BLACK);
