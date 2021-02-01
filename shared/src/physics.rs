@@ -21,6 +21,7 @@ pub struct CollisionShape {
     pub rect: Rect,
 }
 
+#[derive(Debug)]
 pub struct Velocity(pub Vec2);
 
 pub fn sync_transform(transforms: View<Transform>, mut collision_shapes: ViewMut<CollisionShape>) {
@@ -38,6 +39,8 @@ pub fn update_position(
     for (mut transform, velocity) in (&mut transforms, &velocities).iter() {
         transform.position.x += velocity.0.x * delta_time;
         transform.position.y += velocity.0.y * delta_time;
+        transform.position.x = transform.position.x.round();
+        transform.position.y = transform.position.y.round();
     }
 }
 
@@ -65,7 +68,7 @@ pub fn calculate_collisions(
                 ..
             }) = collision
             {
-                let velocity_resolution = contact_normal
+                let velocity_resolution: Vec2 = contact_normal
                     * vec2(f32::abs(velocity.0.x), f32::abs(velocity.0.y))
                     * (1.0 - contact_time);
                 velocity.0 += velocity_resolution;
@@ -83,8 +86,8 @@ pub struct HitCollision {
 pub fn ray_rect_collision(origin: Vec2, direction: Vec2, rect: Rect) -> Option<HitCollision> {
     let rect_pos = vec2(rect.x, rect.y);
     let rect_size = vec2(rect.w, rect.h);
-    let mut t_near = (rect_pos - origin) / direction;
-    let mut t_far = (rect_pos + rect_size - origin) / direction;
+    let mut t_near: Vec2 = (rect_pos - origin) / direction;
+    let mut t_far: Vec2 = (rect_pos + rect_size - origin) / direction;
 
     if t_near.is_nan().any() || t_far.is_nan().any() {
         return None;
@@ -104,7 +107,7 @@ pub fn ray_rect_collision(origin: Vec2, direction: Vec2, rect: Rect) -> Option<H
     let t_hit_near = f32::max(t_near.x, t_near.y);
     let t_hit_far = f32::min(t_far.x, t_far.y);
 
-    if t_hit_far < 0.0 || t_hit_near > 1.0 || t_hit_near < 0.0 {
+    if t_hit_far < 0.0 || t_hit_near >= 1.0 || t_hit_near < 0.0 {
         return None;
     }
 
@@ -136,10 +139,10 @@ pub fn ray_rect_collision(origin: Vec2, direction: Vec2, rect: Rect) -> Option<H
 pub fn rect_rect_collision(
     source: &Rect,
     target: &Rect,
-    vel: Vec2,
+    source_vel: Vec2,
     delta_time: f32,
 ) -> Option<HitCollision> {
-    if vel.x == 0.0 && vel.y == 0.0 {
+    if source_vel.x == 0.0 && source_vel.y == 0.0 {
         return None;
     }
 
@@ -154,7 +157,7 @@ pub fn rect_rect_collision(
 
     let ray_origin = vec2(source.x + source.w / 2.0, source.y + source.h / 2.0);
 
-    return ray_rect_collision(ray_origin, vel * delta_time, expanded_target);
+    return ray_rect_collision(ray_origin, source_vel * delta_time, expanded_target);
 }
 
 pub fn load_level_collisions(world: &mut World) {

@@ -45,7 +45,7 @@ fn server(ip: String) -> Result<(), RenetError> {
         Server::new(socket, server_config, endpoint_config, channels())?;
 
     let mut world = World::new();
-    // load_level_collisions(&mut world);
+    load_level_collisions(&mut world);
 
     world.add_unique(PlayerMapping::new()).unwrap();
 
@@ -123,6 +123,7 @@ fn server(ip: String) -> Result<(), RenetError> {
         // world.run(debug::<Player>).unwrap();
         // world.run(debug::<PlayerInput>).unwrap();
         // world.run(debug::<Transform>).unwrap();
+        // world.run(debug::<Velocity>).unwrap();
 
         let server_frame = ServerFrame::from_world(&world);
         // println!("{:?}", server_frame);

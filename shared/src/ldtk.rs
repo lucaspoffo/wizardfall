@@ -1,6 +1,6 @@
 use ldtk_rust::{Project, TileInstance};
 use macroquad::prelude::*;
-use shipyard::{UniqueView, UniqueViewMut, World};
+use shipyard::{UniqueView, World};
 
 use std::collections::HashMap;
 
@@ -110,11 +110,23 @@ pub fn load_level_collisions(world: &mut World) {
         collision_layer.grid_size as f32,
     );
 
+    let grid_width = collision_layer.c_wid as usize;
+    let grid_height = collision_layer.c_hei as usize;
+    let mut collisions = vec![false; grid_width * grid_height];
+
     for tile in collision_layer.int_grid.iter() {
-        let x = (tile.coord_id % collision_layer.c_wid) as f32 * grid_size.x;
-        let y = (tile.coord_id / collision_layer.c_wid) as f32 * grid_size.y;
-        let rect = Rect::new(x, y, grid_size.x, grid_size.y);
-        let collision_shape = CollisionShape { rect };
+        collisions[tile.coord_id as usize] = true;
+    }
+
+    let mut rects = collapse(collisions, grid_width, grid_height);
+
+    for mut rect in rects.iter_mut() {
+        rect.x *= grid_size.x;
+        rect.y *= grid_size.y;
+        rect.w *= grid_size.x;
+        rect.h *= grid_size.y;
+
+        let collision_shape = CollisionShape { rect: *rect };
         println!("Created collision shape {:?}", collision_shape);
         world.add_entity((collision_shape,));
     }
@@ -190,8 +202,6 @@ fn collapse(mut collisions: Vec<bool>, width: usize, height: usize) -> Vec<Rect>
                 }
 
                 for a in 0..x_len {
-                    println!("i: {}, j: {}, x_len: {}, y_len: {}, a: {}", i, j, x_len, y_len, a);
-                    dbg!(i + a + (j + y_len) * width);
                     can_expand &= collisions[i + a + (j + y_len) * width];
                 }
 
@@ -207,14 +217,11 @@ fn collapse(mut collisions: Vec<bool>, width: usize, height: usize) -> Vec<Rect>
             // Remove collision
             for y in j..(j + y_len) {
                 for x in i..(i + x_len) {
-                    println!("a: {}, b: {}, x_len: {}, y_len: {}", x, y, x_len, y_len);
-                    dbg!(x + y * height);
-                    collisions[x + y * height] = false;
+                    collisions[x + y * width] = false;
                 }
             }
         }
     }
-    println!("{:?}", rects);
     rects
 }
 
@@ -225,10 +232,8 @@ mod tests {
     #[test]
     fn test_collapse() {
         let collisions: Vec<bool> = vec![
-            true , true, false, false,
-            true , true, false, false, 
-            false, false,true,  true, 
-            false, false,true,  true,
+            true, true, false, false, true, true, false, false, false, false, true, true, false,
+            false, true, true,
         ];
 
         let rects = collapse(collisions, 4, 4);
@@ -241,5 +246,58 @@ mod tests {
         assert_eq!(rects[1].y, 2.0);
         assert_eq!(rects[1].w, 2.0);
         assert_eq!(rects[1].h, 2.0);
+    }
+
+    #[test]
+    fn test_collapse_full() {
+        let collisions: Vec<bool> = vec![
+            true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+            true, true,
+        ];
+
+        let rects = collapse(collisions, 4, 4);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].x, 0.0);
+        assert_eq!(rects[0].y, 0.0);
+        assert_eq!(rects[0].w, 4.0);
+        assert_eq!(rects[0].h, 4.0);
+    }
+
+    #[test]
+    fn test_collapse_double() {
+        let collisions: Vec<bool> = vec![
+            false, false, true, true, true, true, true, true, true, true, true, true, true, true,
+            false, false,
+        ];
+
+        let rects = collapse(collisions, 4, 4);
+        assert_eq!(rects.len(), 2);
+        assert_eq!(rects[0].x, 2.0);
+        assert_eq!(rects[0].y, 0.0);
+        assert_eq!(rects[0].w, 2.0);
+        assert_eq!(rects[0].h, 3.0);
+        assert_eq!(rects[1].x, 0.0);
+        assert_eq!(rects[1].y, 1.0);
+        assert_eq!(rects[1].w, 2.0);
+        assert_eq!(rects[1].h, 3.0);
+    }
+
+    #[test]
+    fn test_collapse_width_height() {
+        let collisions: Vec<bool> = vec![
+            true, true, true, true, true, false, false, false, false, false, true, true, true,
+            true, true, false, false, false, false, false,
+        ];
+
+        let rects = collapse(collisions, 5, 4);
+        assert_eq!(rects.len(), 2);
+        assert_eq!(rects[0].x, 0.0);
+        assert_eq!(rects[0].y, 0.0);
+        assert_eq!(rects[0].w, 5.0);
+        assert_eq!(rects[0].h, 1.0);
+        assert_eq!(rects[1].x, 0.0);
+        assert_eq!(rects[1].y, 2.0);
+        assert_eq!(rects[1].w, 5.0);
+        assert_eq!(rects[1].h, 1.0);
     }
 }
