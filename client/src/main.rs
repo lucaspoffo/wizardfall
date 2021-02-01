@@ -1,11 +1,11 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels, Animation, AnimationController, CastTarget, EntityMapping,
-    Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile, ServerFrame,
-    Transform, 
-    physics::CollisionShape,
-    ldtk::{load_project_and_assets, draw_level, load_level_collisions}
+    channels,
+    ldtk::{draw_level, load_project_and_assets},
+    physics::*,
+    Animation, AnimationController, CastTarget, EntityMapping, Player, PlayerAction,
+    PlayerAnimation, PlayerInput, Projectile, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -161,10 +161,24 @@ async fn main() {
     app.load_texture().await;
 
     load_project_and_assets(&app.world).await;
-    load_level_collisions(&mut app.world);
+
+    let viewport_height = 400.0;
+    let aspect = screen_width() / screen_height();
+    let viewport_width = viewport_height * aspect;
+    
+    let camera = Camera2D {
+            zoom: vec2(
+                1.0 / viewport_width as f32 * 2.,
+                -1.0 / viewport_height as f32 * 2.,
+            ),
+            target: vec2(0.0, 0.0),
+            ..Default::default()
+        };
 
     loop {
         clear_background(BLACK);
+
+        set_camera(camera);
 
         app.update().await;
 
