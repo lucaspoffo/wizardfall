@@ -6,7 +6,7 @@ pub fn network_state_impl(input: proc_macro::TokenStream) -> proc_macro::TokenSt
     let type_name = input.ident;
 
     let gen = quote! {
-        impl NetworkState for #type_name {
+        impl crate::network::NetworkState for #type_name {
             type State = Self;
 
             fn from_state(state: Self::State) -> Self {

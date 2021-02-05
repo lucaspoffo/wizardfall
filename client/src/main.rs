@@ -1,10 +1,12 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels,
+    channels, EntityMapping, Transform,
     ldtk::{draw_level, load_project_and_assets},
-    Animation, AnimationController, CastTarget, EntityMapping, Player, PlayerAction,
-    PlayerAnimation, PlayerInput, Projectile, ServerFrame, Transform,
+    animation::{Animation, AnimationController}, 
+    player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
+    projectile::Projectile, 
+    network::ServerFrame,
 };
 
 use alto_logger::TermLogger;
