@@ -13,4 +13,7 @@ bincode = "1.3.1"
 log = "0.4.11"
 alto_logger = "0.3.6"
 glam = { version = "0.10", features = [ "serde" ] }
-shipyard = { git = "https://github.com/leudz/shipyard.git", rev = "a87e59e441d938bd7dc18bebf97456eff8707484" }
+shipyard = { git = "https://github.com/leudz/shipyard.git", version = "0.4.1", features = [ "serde1" ] }
+shipyard_rapier2d = { path = "../../shipyard_rapier/shipyard_rapier2d", features = [ "render" ] }
+# TODO: remove this and use only miniquad as an debug feature.
+macroquad = { version = "=0.3.0-alpha.14", features = [ "log-impl" ] }

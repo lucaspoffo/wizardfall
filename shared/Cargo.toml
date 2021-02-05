@@ -12,5 +12,6 @@ derive = { path = "../derive" }
 macroquad = { version = "=0.3.0-alpha.14", features = [ "log-impl" ] }
 serde = "1"
 glam = { version = "0.10", features = [ "serde" ] }
-shipyard = { git = "https://github.com/leudz/shipyard.git", rev = "a87e59e441d938bd7dc18bebf97456eff8707484", features = [ "serde1" ] }
+shipyard = { git = "https://github.com/leudz/shipyard.git", version = "0.4.1", features = [ "serde1" ] }
 ldtk_rust = "0.3.0"
+shipyard_rapier2d = { path = "../../shipyard_rapier/shipyard_rapier2d" }

@@ -6,6 +6,13 @@ use std::collections::HashMap;
 
 use super::physics::CollisionShape;
 
+use shipyard_rapier2d::{
+    rapier::{
+        dynamics::RigidBodyBuilder,
+        geometry::ColliderBuilder
+    }
+};
+
 #[derive(Debug)]
 pub struct TextureAtlas {
     texture: Texture2D,
@@ -24,7 +31,7 @@ impl TextureAtlas {
         }
     }
 
-    pub fn draw_tile(&self, tile: &TileInstance) {
+    pub fn draw_tile(&self, tile: &TileInstance, grid_height: i64) {
         let draw_rect = Rect::new(
             tile.src[0] as f32,
             tile.src[1] as f32,
@@ -45,7 +52,9 @@ impl TextureAtlas {
         }
 
         let mut dest_size = self.tile_size;
-        let mut draw_pos = vec2(tile.px[0] as f32, tile.px[1] as f32);
+        let pos_x = (tile.px[0] as f32) + self.tile_size.x;
+        let pos_y = (tile.px[1] - grid_height) as f32 + self.tile_size.y;
+        let mut draw_pos = vec2(pos_x, pos_y);
         if flip_x {
             dest_size.x *= -1.0;
             draw_pos.x += self.tile_size.x;
@@ -121,14 +130,19 @@ pub fn load_level_collisions(world: &mut World) {
     let mut rects = collapse(collisions, grid_width, grid_height);
 
     for mut rect in rects.iter_mut() {
+        rect.h *= grid_size.x / 2.0;
+        rect.w *= grid_size.y / 2.0;
         rect.x *= grid_size.x;
         rect.y *= grid_size.y;
-        rect.w *= grid_size.x;
-        rect.h *= grid_size.y;
-
-        let collision_shape = CollisionShape { rect: *rect };
-        println!("Created collision shape {:?}", collision_shape);
-        world.add_entity((collision_shape,));
+        rect.x += rect.w;
+        rect.y += rect.h;
+         
+        
+        println!("Created collision: {:?}", rect);
+        let rigid_body = RigidBodyBuilder::new_static().translation(rect.x, rect.y);
+        let collider = ColliderBuilder::cuboid(rect.w, rect.h);
+ 
+        world.add_entity((rigid_body, collider));
     }
 }
 
@@ -151,19 +165,20 @@ pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<Sprite
             None => continue,
         };
 
+        let grid_height = layer.c_hei * layer.grid_size;
         // Finally we match on the four possible kinds of Layer Instances and
         // handle each accordingly.
         match &layer.layer_instance_type[..] {
             "Tiles" => {
                 //println!("Generating Tile Layer: {}", layer.identifier);
-                for tile in layer.grid_tiles.iter() {
-                    sprite_sheet.draw_tile(&tile);
+                for tile in layer.grid_tiles.iter().rev() {
+                    sprite_sheet.draw_tile(&tile, grid_height);
                 }
             }
             "AutoLayer" => {
                 //println!("Generating AutoTile Layer: {}", layer.identifier);
                 for tile in layer.auto_layer_tiles.iter() {
-                    sprite_sheet.draw_tile(&tile);
+                    sprite_sheet.draw_tile(&tile, grid_height);
                 }
             }
             _ => {

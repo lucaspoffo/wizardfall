@@ -140,7 +140,7 @@ impl App {
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
-        self.world.run(draw_collisions).unwrap();
+        // self.world.run(draw_collisions).unwrap();
     }
 }
 
@@ -154,7 +154,7 @@ async fn main() {
             .as_secs(),
     );
 
-    let viewport_height = 320.0;
+    let viewport_height = 600.0;
     let aspect = screen_width() / screen_height();
     let viewport_width = viewport_height * aspect;
 
@@ -163,7 +163,8 @@ async fn main() {
             1.0 / viewport_width as f32 * 2.,
             -1.0 / viewport_height as f32 * 2.,
         ),
-        target: vec2(viewport_width / 2., viewport_height / 2.),
+        // TODO: remove tile size magic numbers
+        target: vec2(viewport_width / 2. + 16., -viewport_height / 2. + 16.),
         ..Default::default()
     };
 
@@ -243,7 +244,7 @@ fn draw_players(
         );
 
         let x = transform.position.x;
-        let y = transform.position.y;
+        let y = - transform.position.y;
 
         let mut params = DrawTextureParams::default();
         params.source = Some(draw_rect);
