@@ -3,7 +3,6 @@ use macroquad::prelude::*;
 use shared::{
     channels,
     ldtk::{draw_level, load_project_and_assets},
-    physics::*,
     Animation, AnimationController, CastTarget, EntityMapping, Player, PlayerAction,
     PlayerAnimation, PlayerInput, Projectile, ServerFrame, Transform,
 };
@@ -136,11 +135,9 @@ impl App {
         // self.world.run(debug::<Projectile>);
         // self.world.run(debug::<Transform>);
 
-        // self.world.run(draw_players).unwrap();
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
-        // self.world.run(draw_collisions).unwrap();
     }
 }
 
@@ -294,15 +291,3 @@ fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
     }
 }
 
-fn draw_collisions(collision_shapes: View<CollisionShape>) {
-    for collision_shape in collision_shapes.iter() {
-        draw_rectangle_lines(
-            collision_shape.rect.x,
-            collision_shape.rect.y,
-            collision_shape.rect.w,
-            collision_shape.rect.h,
-            1.0,
-            GREEN,
-        );
-    }
-}

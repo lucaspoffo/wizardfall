@@ -2,9 +2,8 @@ use macroquad::prelude::*;
 use shared::{
     channels,
     ldtk::load_level_collisions,
-    physics::{calculate_collisions, sync_transform, update_position, CollisionShape, Velocity},
     AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile,
-    ProjectileType, Rect, ServerFrame, Transform,
+    ProjectileType, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -19,7 +18,7 @@ use shipyard_rapier2d::{
     na::Vector2,
     physics::{
         create_body_and_collider_system, create_joints_system, destroy_body_and_collider_system,
-        setup_physics, step_world_system, RigidBodyHandleComponent, ColliderHandleComponent
+        setup_physics, step_world_system, RigidBodyHandleComponent
     },
     rapier::{
         dynamics::{RigidBodyBuilder, RigidBodySet},
@@ -29,13 +28,13 @@ use shipyard_rapier2d::{
 };
 
 
-use glam::{Vec2, Vec3, vec2};
+use glam::{Vec2, vec2};
 use shipyard::*;
 
 use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::thread::sleep;
 use std::time::{Duration, Instant};
+// use std::thread::sleep;
 
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {

@@ -4,8 +4,6 @@ use shipyard::{UniqueView, World};
 
 use std::collections::HashMap;
 
-use super::physics::CollisionShape;
-
 use shipyard_rapier2d::{
     rapier::{
         dynamics::RigidBodyBuilder,
