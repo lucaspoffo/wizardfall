@@ -1,11 +1,12 @@
 use macroquad::prelude::*;
 use shared::{
-    Transform, channels,
-    ldtk::load_level_collisions, 
-    animation::AnimationController, 
-    player::{Player, PlayerAction, PlayerAnimation, PlayerInput},
-    projectile::{Projectile, ProjectileType},
+    animation::AnimationController,
+    channels,
+    ldtk::load_level_collisions,
     network::ServerFrame,
+    player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
+    projectile::{Projectile, ProjectileType},
+    Transform,
 };
 
 use alto_logger::TermLogger;
@@ -100,49 +101,8 @@ async fn server(ip: String) -> Result<(), RenetError> {
 
         for (client_id, messages) in server.get_messages_from_channel(2).iter() {
             for message in messages.iter() {
-                let player_action: PlayerAction =
-                    deserialize(message).expect("Failed to deserialize.");
-                match player_action {
-                    PlayerAction::CastFireball(cast_target) => {
-                        world.run(
-                            |player_mapping: UniqueView<PlayerMapping>,
-                             mut entities: EntitiesViewMut,
-                             mut transforms: ViewMut<Transform>,
-                             mut projectiles: ViewMut<Projectile>| {
-                                if let Some(entity_id) = player_mapping.get(client_id) {
-                                    let transform = (&transforms).get(*entity_id).unwrap();
-                                    let projectile = Projectile::new(ProjectileType::Fireball);
-                                    let direction =
-                                        (cast_target.position - transform.position).normalize();
-                                    let rotation = direction.angle_between(Vec2::unit_x());
-                                    let transform = Transform::new(transform.position, rotation);
-                                    entities.add_entity(
-                                        (&mut projectiles, &mut transforms),
-                                        (projectile, transform),
-                                    );
-                                }
-                            },
-                        ).unwrap();
-                    }
-                    PlayerAction::CastTeleport(cast_target) => {
-                        world.run(
-                            |player_mapping: UniqueView<PlayerMapping>,
-                            body_handles: View<RigidBodyHandleComponent>,
-                            mut rigid_bodies: UniqueViewMut<RigidBodySet>| {
-                                if let Some(entity_id) = player_mapping.get(client_id) {
-                                    if let Ok(rigid_body) = body_handles.get(*entity_id) {
-                                        if let Some(rb) = rigid_bodies.get_mut(rigid_body.handle()) {
-                                            let mut pos = *rb.position();
-                                            pos.translation.x = cast_target.position.x;
-                                            pos.translation.y = cast_target.position.y;
-                                            rb.set_position(pos, true);
-                                        }
-                                    }
-                                }
-                            },
-                        ).unwrap();
-                    }
-                }
+                let player_action: PlayerAction = deserialize(message).unwrap();
+                handle_player_action(&mut world, player_action, client_id);
             }
         }
 
@@ -192,6 +152,56 @@ async fn server(ip: String) -> Result<(), RenetError> {
             sleep(wait);
         }*/
         next_frame().await;
+    }
+}
+
+fn handle_player_action(world: &mut World, player_action: PlayerAction, client_id: &u64) {
+    match player_action {
+        PlayerAction::CastFireball(cast_target) => {
+            world
+                .run_with_data(cast_fireball, (client_id, cast_target))
+                .unwrap();
+        }
+        PlayerAction::CastTeleport(cast_target) => {
+            world
+                .run_with_data(cast_teleport, (client_id, cast_target))
+                .unwrap();
+        }
+    }
+}
+
+fn cast_fireball(
+    (client_id, cast_target): (&u64, CastTarget),
+    player_mapping: UniqueView<PlayerMapping>,
+    mut entities: EntitiesViewMut,
+    mut transforms: ViewMut<Transform>,
+    mut projectiles: ViewMut<Projectile>,
+) {
+    if let Some(player_entity) = player_mapping.get(client_id) {
+        let transform = (&transforms).get(*player_entity).unwrap();
+        let projectile = Projectile::new(ProjectileType::Fireball);
+        let direction = (cast_target.position - transform.position).normalize();
+        let rotation = direction.angle_between(Vec2::unit_x());
+        let transform = Transform::new(transform.position, rotation);
+        entities.add_entity((&mut projectiles, &mut transforms), (projectile, transform));
+    }
+}
+
+fn cast_teleport(
+    (client_id, cast_target): (&u64, CastTarget),
+    player_mapping: UniqueView<PlayerMapping>,
+    body_handles: View<RigidBodyHandleComponent>,
+    mut rigid_bodies: UniqueViewMut<RigidBodySet>,
+) {
+    if let Some(entity_id) = player_mapping.get(client_id) {
+        if let Ok(rigid_body) = body_handles.get(*entity_id) {
+            if let Some(rb) = rigid_bodies.get_mut(rigid_body.handle()) {
+                let mut pos = *rb.position();
+                pos.translation.x = cast_target.position.x;
+                pos.translation.y = cast_target.position.y;
+                rb.set_position(pos, true);
+            }
+        }
     }
 }
 
