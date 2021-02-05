@@ -80,8 +80,9 @@ impl App {
         let left = is_key_down(KeyCode::A) || is_key_down(KeyCode::Left);
         let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
 
-        let direction = self.world.run_with_data(player_direction, self.id).unwrap();
-
+        let mut mouse_world_position = self.camera.screen_to_world(mouse_position().into());
+        mouse_world_position.y *= -1.;
+        let direction = self.world.run_with_data(player_direction, (self.id, mouse_world_position)).unwrap();
         let input = PlayerInput {
             up,
             down,
@@ -90,9 +91,10 @@ impl App {
             direction,
         };
 
+
         if is_mouse_button_pressed(MouseButton::Left) {
             let cast_target = CastTarget {
-                position: self.camera.screen_to_world(mouse_position().into()),
+                position: mouse_world_position,
             };
 
             let cast_fireball = PlayerAction::CastFireball(cast_target);
@@ -103,9 +105,9 @@ impl App {
 
         if is_key_pressed(KeyCode::Space) {
             let mut cast_target = CastTarget {
-                position: mouse_position().into(),
+                position: mouse_world_position,
             };
-            cast_target.position = cast_target.position - vec2(16.0, 24.0);
+            cast_target.position = cast_target.position + vec2(-16.0, 24.0);
             let cast_teleport = PlayerAction::CastTeleport(cast_target);
 
             let message = bincode::serialize(&cast_teleport).expect("Failed to serialize message.");
@@ -255,12 +257,13 @@ fn draw_players(
 
         draw_texture_ex(texture_animation.texture, draw_x, y, WHITE, params);
 
+        // Draw wand
         let center_x = x + (texture_animation.width as f32 / 2.0);
         let center_y = y + 4.0 + (texture_animation.height as f32 / 2.0);
 
         let wand_size = 12.0;
         let wand_x = center_x + player.direction.x * wand_size;
-        let wand_y = center_y + player.direction.y * wand_size;
+        let wand_y = center_y - player.direction.y * wand_size;
 
         draw_line(center_x, center_y, wand_x, wand_y, 3.0, YELLOW);
         draw_circle(wand_x, wand_y, 3.0, RED);
@@ -269,15 +272,14 @@ fn draw_players(
 
 fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     for (_, transform) in (&projectiles, &transform).iter() {
-        draw_rectangle(transform.position.x, transform.position.y, 16.0, 16.0, RED);
+        draw_rectangle(transform.position.x, - transform.position.y, 16.0, 16.0, RED);
     }
 }
 
-fn player_direction(client_id: u64, players: View<Player>, transforms: View<Transform>) -> Vec2 {
+fn player_direction((client_id, mouse_world_position): (u64, Vec2), players: View<Player>, transforms: View<Transform>) -> Vec2 {
     for (player, transform) in (&players, &transforms).iter() {
         if player.client_id == client_id {
-            let mouse_pos: Vec2 = mouse_position().into();
-            return (mouse_pos - transform.position).normalize();
+            return (mouse_world_position - transform.position).normalize();
         }
     }
 

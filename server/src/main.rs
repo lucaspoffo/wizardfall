@@ -1,9 +1,7 @@
 use macroquad::prelude::*;
 use shared::{
-    channels,
-    ldtk::load_level_collisions,
-    AnimationController, Player, PlayerAction, PlayerAnimation, PlayerInput, Projectile,
-    ProjectileType, ServerFrame, Transform,
+    channels, ldtk::load_level_collisions, AnimationController, Player, PlayerAction,
+    PlayerAnimation, PlayerInput, Projectile, ProjectileType, ServerFrame, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -15,20 +13,19 @@ use renet::{
     server::{Server, ServerConfig, ServerEvent},
 };
 use shipyard_rapier2d::{
-    na::Vector2,
+    na::{Vector2, Isometry2},
     physics::{
         create_body_and_collider_system, create_joints_system, destroy_body_and_collider_system,
-        setup_physics, step_world_system, RigidBodyHandleComponent
+        setup_physics, step_world_system, RigidBodyHandleComponent,
     },
     rapier::{
         dynamics::{RigidBodyBuilder, RigidBodySet},
         geometry::ColliderBuilder,
     },
-    render::render_colliders
+    render::render_colliders,
 };
 
-
-use glam::{Vec2, vec2};
+use glam::{vec2, Vec2};
 use shipyard::*;
 
 use std::collections::HashMap;
@@ -126,11 +123,17 @@ async fn server(ip: String) -> Result<(), RenetError> {
                     PlayerAction::CastTeleport(cast_target) => {
                         world.run(
                             |player_mapping: UniqueView<PlayerMapping>,
-                             mut transforms: ViewMut<Transform>| {
+                            body_handles: View<RigidBodyHandleComponent>,
+                            mut rigid_bodies: UniqueViewMut<RigidBodySet>| {
                                 if let Some(entity_id) = player_mapping.get(client_id) {
-                                    let mut transform = (&mut transforms).get(*entity_id).unwrap();
-                                    transform.position.x = cast_target.position.x;
-                                    transform.position.y = cast_target.position.y;
+                                    if let Ok(rigid_body) = body_handles.get(*entity_id) {
+                                        if let Some(rb) = rigid_bodies.get_mut(rigid_body.handle()) {
+                                            let mut pos = *rb.position();
+                                            pos.translation.x = cast_target.position.x;
+                                            pos.translation.y = cast_target.position.y;
+                                            rb.set_position(pos, true);
+                                        }
+                                    }
                                 }
                             },
                         ).unwrap();
@@ -149,9 +152,9 @@ async fn server(ip: String) -> Result<(), RenetError> {
         world.run(create_joints_system).unwrap();
         world.run_with_data(step_world_system, 0.0016666).unwrap();
         world.run(destroy_body_and_collider_system).unwrap();
-        
+
         world.run(sync_transform_rapier).unwrap();
-        
+
         world.run(render_colliders).unwrap();
         // world.run(debug::<Player>).unwrap();
         // world.run(debug::<PlayerInput>).unwrap();
@@ -312,10 +315,7 @@ fn sync_transform_rapier(
         if let Some(rb) = bodies_set.get(rigid_body.handle()) {
             let pos = *rb.position();
             // TODO: Check if is need to check interpolate with previous pos
-            transform.position = Vec2::new(
-                pos.translation.vector.x,
-                pos.translation.vector.y,
-            );
+            transform.position = Vec2::new(pos.translation.vector.x, pos.translation.vector.y);
         }
     }
 }
