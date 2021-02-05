@@ -25,6 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 struct App {
     id: u64,
     world: World,
+    camera: Camera2D,
     connection: ClientConnected,
 }
 
@@ -51,11 +52,12 @@ impl TextureAnimation {
 }
 
 impl App {
-    fn new(id: u64, connection: ClientConnected) -> Self {
+    fn new(id: u64, camera: Camera2D, connection: ClientConnected) -> Self {
         let world = World::new();
         Self {
             id,
             world,
+            camera,
             connection,
         }
     }
@@ -91,8 +93,9 @@ impl App {
 
         if is_mouse_button_pressed(MouseButton::Left) {
             let cast_target = CastTarget {
-                position: mouse_position().into(),
+                position: self.camera.screen_to_world(mouse_position().into()),
             };
+
             let cast_fireball = PlayerAction::CastFireball(cast_target);
 
             let message = bincode::serialize(&cast_fireball).expect("Failed to serialize message.");
@@ -151,9 +154,22 @@ async fn main() {
             .as_secs(),
     );
 
+    let viewport_height = 320.0;
+    let aspect = screen_width() / screen_height();
+    let viewport_width = viewport_height * aspect;
+
+    let camera = Camera2D {
+        zoom: vec2(
+            1.0 / viewport_width as f32 * 2.,
+            -1.0 / viewport_height as f32 * 2.,
+        ),
+        target: vec2(viewport_width / 2., viewport_height / 2.),
+        ..Default::default()
+    };
+
     let id = rand::rand() as u64;
     let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
-    let mut app = App::new(id, connection);
+    let mut app = App::new(id, camera, connection);
 
     let mapping: EntityMapping = HashMap::new();
     app.world.add_unique(mapping).unwrap();
@@ -162,23 +178,10 @@ async fn main() {
 
     load_project_and_assets(&app.world).await;
 
-    let viewport_height = 400.0;
-    let aspect = screen_width() / screen_height();
-    let viewport_width = viewport_height * aspect;
-    
-    let camera = Camera2D {
-            zoom: vec2(
-                1.0 / viewport_width as f32 * 2.,
-                -1.0 / viewport_height as f32 * 2.,
-            ),
-            target: vec2(0.0, 0.0),
-            ..Default::default()
-        };
-
     loop {
         clear_background(BLACK);
 
-        set_camera(camera);
+        set_camera(app.camera);
 
         app.update().await;
 
