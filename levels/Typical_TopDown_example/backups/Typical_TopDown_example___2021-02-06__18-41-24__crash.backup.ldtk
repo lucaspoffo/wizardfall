@@ -14,7 +14,7 @@
 	"defaultGridSize": 16,
 	"bgColor": "#141522",
 	"defaultLevelBgColor": "#141522",
-	"nextUid": 62,
+	"nextUid": 59,
 	"minifyJson": false,
 	"externalLevels": false,
 	"exportTiled": false,
@@ -382,25 +382,7 @@
 				"tilePivotY": 0
 			}
 		],
-		"entities": [
-			{
-				"identifier": "PlayerRespawn",
-				"uid": 59,
-				"width": 16,
-				"height": 16,
-				"color": "#0D2893",
-				"renderMode": "Rectangle",
-				"showName": true,
-				"tilesetId": null,
-				"tileId": null,
-				"tileRenderMode": "Stretch",
-				"maxPerLevel": 0,
-				"limitBehavior": "DiscardOldOnes",
-				"pivotX": 0,
-				"pivotY": 0,
-				"fieldDefs": []
-			}
-		],
+		"entities": [],
 		"tilesets": [
 			{
 				"identifier": "TopDown_by_deepnight",
@@ -466,11 +448,7 @@
 					"autoLayerTiles": [],
 					"seed": 5347079,
 					"gridTiles": [],
-					"entityInstances": [
-						{ "__identifier": "PlayerRespawn", "__grid": [6,5], "__pivot": [0,0], "__tile": null, "defUid": 59, "px": [96,80], "fieldInstances": [] },
-						{ "__identifier": "PlayerRespawn", "__grid": [5,32], "__pivot": [0,0], "__tile": null, "defUid": 59, "px": [80,512], "fieldInstances": [] },
-						{ "__identifier": "PlayerRespawn", "__grid": [44,5], "__pivot": [0,0], "__tile": null, "defUid": 59, "px": [704,80], "fieldInstances": [] }
-					]
+					"entityInstances": []
 				},
 				{
 					"__identifier": "Wall_overlays",

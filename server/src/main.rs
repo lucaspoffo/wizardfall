@@ -2,7 +2,7 @@ use macroquad::prelude::*;
 use shared::{
     animation::AnimationController,
     channels,
-    ldtk::load_level_collisions,
+    ldtk::{load_level_collisions, PlayerRespawnPoints},
     network::ServerFrame,
     player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
@@ -48,6 +48,7 @@ async fn main() {
 }
 
 type PlayerMapping = HashMap<u64, EntityId>;
+
 
 #[derive(Debug, Default)]
 struct PlayerRespawn(HashMap<u64, Timer>);
@@ -316,6 +317,7 @@ fn update_players(
 
 fn create_player(
     client_id: u64,
+    player_respawn_points: UniqueView<PlayerRespawnPoints>,
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
     mut players: ViewMut<Player>,
@@ -328,13 +330,16 @@ fn create_player(
     let player = Player::new(client_id);
     let transform = Transform::default();
     let animation = PlayerAnimation::Idle.get_animation_controller();
+
+    let player_position = player_respawn_points.0[rand::rand() as usize % player_respawn_points.0.len()];
+
     let rigid_body = RigidBodyBuilder::new_dynamic()
         .lock_rotations()
-        .translation(50.0, 50.0);
+        .translation(player_position.x, player_position.y);
 
     let entity_id = entities.add_entity((), ());
     let user_data = EntityUserData::new(entity_id, EntityType::Player);
-    let player_health = Health::new(255);
+    let player_health = Health::new(50);
 
     let collider_builder = ColliderBuilder::cuboid(16., 24.).user_data(user_data.into());
 
@@ -381,7 +386,6 @@ fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
 struct Dead;
 
 fn display_events(
-    entities: EntitiesViewMut,
     events: UniqueViewMut<EventQueue>,
     colliders: UniqueView<ColliderSet>,
     projectiles: View<Projectile>,
@@ -414,7 +418,7 @@ fn display_events(
                     ..
                 },
             ) => {
-                entities.add_component(*fireball, &mut deads, Dead);
+                deads.add_component_unchecked(*fireball, Dead);
             },
             (
                 EntityUserData {
@@ -443,7 +447,7 @@ fn display_events(
                 }
                 let mut health = (&mut health).get(*player).unwrap();
                 health.take_damage(10);
-                entities.add_component(*fireball, &mut deads, Dead);
+                deads.add_component_unchecked(*fireball, Dead);
             }
             _ => {
                 println!(
@@ -492,7 +496,7 @@ fn add_player_respawn(mut players: ViewMut<Player>, mut player_respawn: UniqueVi
     }
 }
 
-fn player_respawn(mut players: ViewMut<Player>, mut player_respawn: UniqueViewMut<PlayerRespawn>) -> Vec<u64> {
+fn player_respawn(mut player_respawn: UniqueViewMut<PlayerRespawn>) -> Vec<u64> {
     let mut respawn_players: Vec<u64> = vec![];
     for (client_id, timer) in player_respawn.0.iter() {
         if timer.is_finished() {

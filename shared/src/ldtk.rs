@@ -1,4 +1,4 @@
-use ldtk_rust::{Project, TileInstance};
+use ldtk_rust::{LayerInstance, Project, TileInstance};
 use macroquad::prelude::*;
 use shipyard::{UniqueView, World};
 
@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use shipyard_rapier2d::rapier::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
 
-use crate::{EntityUserData, EntityType};
+use crate::{EntityType, EntityUserData};
 
 #[derive(Debug)]
 pub struct TextureAtlas {
@@ -99,8 +99,35 @@ pub async fn load_project_and_assets(world: &World) {
     world.add_unique(sprite_sheets).unwrap();
 }
 
+pub struct PlayerRespawnPoints(pub Vec<Vec2>);
+
+// This is an util to fix the y position for the entities loaded from LDtk
+// The rapier physics engine uses an inverted Y axis compared to the level editor.
+fn fix_y_axis(layer: &LayerInstance, value: f32) -> f32 {
+    - value + (layer.grid_size * layer.c_hei) as f32
+}
+
 pub fn load_level_collisions(world: &mut World) {
     let project = load_project();
+
+    let entity_layer = project.levels[0]
+        .layer_instances
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|l| l.identifier == "Entities".to_string())
+        .unwrap();
+    
+    let mut player_respawn_points = PlayerRespawnPoints(vec![]);
+
+    for entity in entity_layer.entity_instances.iter() {
+        println!("Entity identifier: {}", entity.identifier);
+        println!("Entity px: {:?}", entity.px);
+        player_respawn_points.0.push(vec2(entity.px[0] as f32, fix_y_axis(entity_layer, entity.px[1] as f32)));
+    }
+
+    world.add_unique(player_respawn_points).unwrap();
+
     let collision_layer = project.levels[0]
         .layer_instances
         .as_ref()
@@ -131,11 +158,10 @@ pub fn load_level_collisions(world: &mut World) {
         rect.y *= grid_size.y;
         rect.x += rect.w;
         rect.y += rect.h;
-        rect.y = - rect.y + (grid_size.y * grid_height as f32);
-
+        rect.y = fix_y_axis(collision_layer, rect.y); 
         println!("Created collision: {:?}", rect);
         let rigid_body = RigidBodyBuilder::new_static().translation(rect.x, rect.y);
-    
+
         let entity_id = world.add_entity(());
         let user_data = EntityUserData::new(entity_id, EntityType::Wall);
         let collider = ColliderBuilder::cuboid(rect.w, rect.h).user_data(user_data.into());
