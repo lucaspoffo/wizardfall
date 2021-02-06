@@ -6,7 +6,7 @@ use shared::{
     network::ServerFrame,
     player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
-    Transform,
+    Transform, EntityUserData, EntityType
 };
 
 use alto_logger::TermLogger;
@@ -21,11 +21,11 @@ use shipyard_rapier2d::{
     na::Vector2,
     physics::{
         create_body_and_collider_system, create_joints_system, destroy_body_and_collider_system,
-        setup_physics, step_world_system, RigidBodyHandleComponent,
+        setup_physics, step_world_system, EventQueue, RigidBodyHandleComponent,
     },
     rapier::{
         dynamics::{RigidBodyBuilder, RigidBodySet},
-        geometry::ColliderBuilder,
+        geometry::{ColliderBuilder, ColliderSet},
     },
     render::render_colliders,
 };
@@ -62,7 +62,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
 
     world.add_unique(PlayerMapping::new()).unwrap();
 
-    let viewport_height = 600.0;
+    let viewport_height = 592.0;
     let aspect = screen_width() / screen_height();
     let viewport_width = viewport_height * aspect;
 
@@ -120,6 +120,8 @@ async fn server(ip: String) -> Result<(), RenetError> {
         world.run(sync_transform_rapier).unwrap();
 
         world.run(render_colliders).unwrap();
+        world.run(display_events).unwrap();
+        world.run(remove_dead).unwrap();
         // world.run(debug::<Player>).unwrap();
         // world.run(debug::<PlayerInput>).unwrap();
         // world.run(debug::<Transform>).unwrap();
@@ -176,14 +178,38 @@ fn cast_fireball(
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
     mut projectiles: ViewMut<Projectile>,
+    mut colliders_builder: ViewMut<ColliderBuilder>,
+    mut bodies_builder: ViewMut<RigidBodyBuilder>,
 ) {
     if let Some(player_entity) = player_mapping.get(client_id) {
         let transform = (&transforms).get(*player_entity).unwrap();
+
         let projectile = Projectile::new(ProjectileType::Fireball);
         let direction = (cast_target.position - transform.position).normalize();
         let rotation = direction.angle_between(Vec2::unit_x());
+
+        let entity_id = entities.add_entity((), ());
+        let user_data = EntityUserData::new(entity_id, EntityType::Fireball);
+        // TODO: remove magic number fireball speed.
+        let rigid_body = RigidBodyBuilder::new_dynamic()
+            .translation(transform.position.x, transform.position.y)
+            .linvel(direction.x * 200., direction.y * 200.)
+            .rotation(rotation);
+        let collider_builder = ColliderBuilder::ball(8.)
+            .sensor(true)
+            .user_data(user_data.into());
+
         let transform = Transform::new(transform.position, rotation);
-        entities.add_entity((&mut projectiles, &mut transforms), (projectile, transform));
+        entities.add_component(
+            entity_id,
+            (
+                &mut projectiles,
+                &mut transforms,
+                &mut bodies_builder,
+                &mut colliders_builder,
+            ),
+            (projectile, transform, rigid_body, collider_builder),
+        );
     }
 }
 
@@ -215,14 +241,8 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
     let mut remove = vec![];
     {
         let mut projectiles = all_storages.borrow::<ViewMut<Projectile>>().unwrap();
-        let mut transforms = all_storages.borrow::<ViewMut<Transform>>().unwrap();
 
-        for (entity_id, (mut projectile, mut transform)) in
-            (&mut projectiles, &mut transforms).iter().with_id()
-        {
-            let direction = Vec2::new(transform.rotation.cos(), -transform.rotation.sin());
-            transform.position.x += direction.x * 4.0;
-            transform.position.y += direction.y * 4.0;
+        for (entity_id, mut projectile) in (&mut projectiles).iter().with_id() {
             projectile.duration = projectile
                 .duration
                 .checked_sub(Duration::from_micros(16666))
@@ -287,9 +307,14 @@ fn create_player(
     let rigid_body = RigidBodyBuilder::new_dynamic()
         .lock_rotations()
         .translation(50.0, 50.0);
-    let collider = ColliderBuilder::cuboid(16., 24.);
 
-    let entity_id = entities.add_entity(
+    let entity_id = entities.add_entity((), ());
+    let user_data = EntityUserData::new(entity_id, EntityType::Player);
+
+    let collider_builder = ColliderBuilder::cuboid(16., 24.).user_data(user_data.into());
+
+    entities.add_component(
+        entity_id,
         (
             &mut players,
             &mut transforms,
@@ -297,7 +322,7 @@ fn create_player(
             &mut bodies_builder,
             &mut colliders_builder,
         ),
-        (player, transform, animation, rigid_body, collider),
+        (player, transform, animation, rigid_body, collider_builder),
     );
 
     player_mapping.insert(client_id, entity_id);
@@ -320,6 +345,40 @@ fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
     }
 }
 
+struct Dead;
+
+fn display_events(
+    entities: EntitiesViewMut,
+    events: UniqueViewMut<EventQueue>,
+    colliders: UniqueView<ColliderSet>,
+    mut deads: ViewMut<Dead>,
+) {
+    while let Ok(intersection_event) = events.intersection_events.pop() {
+        let collider1 = colliders.get(intersection_event.collider1).unwrap();
+        let collider2 = colliders.get(intersection_event.collider2).unwrap();
+        let entity_data1 = EntityUserData::from_user_data(collider1.user_data);
+        let entity_data2 = EntityUserData::from_user_data(collider2.user_data);
+        match (&entity_data1, &entity_data2) {
+            (EntityUserData { entity_type: EntityType::Wall, .. },
+             EntityUserData { entity_type: EntityType::Fireball, entity_id: fireball }) 
+            | (EntityUserData { entity_type: EntityType::Fireball, entity_id: fireball },
+             EntityUserData { entity_type: EntityType::Wall, .. }) => {
+                entities.add_component(*fireball,&mut deads, Dead);
+            }
+            _ => {
+                println!("Unhandled collision event\nEntity Type 1: {:?}\nEntityType 2:{:?}",
+                    entity_data1.entity_type,
+                    entity_data2.entity_type
+                );
+            }
+        }
+    }
+
+    while let Ok(contact_event) = events.contact_events.pop() {
+        println!("Received contact event: {:?}", contact_event);
+    }
+}
+
 fn sync_transform_rapier(
     mut transforms: ViewMut<Transform>,
     rigid_bodies: View<RigidBodyHandleComponent>,
@@ -332,4 +391,8 @@ fn sync_transform_rapier(
             transform.position = Vec2::new(pos.translation.vector.x, pos.translation.vector.y);
         }
     }
+}
+
+fn remove_dead(mut all_storages: AllStoragesViewMut) {
+    all_storages.delete_any::<SparseSet<Dead>>();
 }

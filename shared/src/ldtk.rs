@@ -4,12 +4,9 @@ use shipyard::{UniqueView, World};
 
 use std::collections::HashMap;
 
-use shipyard_rapier2d::{
-    rapier::{
-        dynamics::RigidBodyBuilder,
-        geometry::ColliderBuilder
-    }
-};
+use shipyard_rapier2d::rapier::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
+
+use crate::{EntityUserData, EntityType};
 
 #[derive(Debug)]
 pub struct TextureAtlas {
@@ -134,13 +131,15 @@ pub fn load_level_collisions(world: &mut World) {
         rect.y *= grid_size.y;
         rect.x += rect.w;
         rect.y += rect.h;
-         
-        
+
         println!("Created collision: {:?}", rect);
         let rigid_body = RigidBodyBuilder::new_static().translation(rect.x, rect.y);
-        let collider = ColliderBuilder::cuboid(rect.w, rect.h);
- 
-        world.add_entity((rigid_body, collider));
+    
+        let entity_id = world.add_entity(());
+        let user_data = EntityUserData::new(entity_id, EntityType::Wall);
+        let collider = ColliderBuilder::cuboid(rect.w, rect.h).user_data(user_data.into());
+
+        world.add_component(entity_id, (rigid_body, collider));
     }
 }
 

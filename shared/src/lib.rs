@@ -1,20 +1,20 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use glam::{vec2, Vec2};
 use renet::channel::{
     ChannelConfig, ReliableOrderedChannelConfig, UnreliableUnorderedChannelConfig,
 };
 use serde::{Deserialize, Serialize};
-use glam::{vec2, Vec2};
 use shipyard::EntityId;
 
 use derive::NetworkState;
 
+pub mod animation;
 pub mod ldtk;
+pub mod message;
 pub mod network;
 pub mod player;
-pub mod animation;
-pub mod message;
 pub mod projectile;
 
 // Server EntityId -> Client EntityId
@@ -58,5 +58,75 @@ impl Default for Transform {
 impl Transform {
     pub fn new(position: Vec2, rotation: f32) -> Self {
         Self { position, rotation }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum EntityType {
+    Unknown,
+    Player,
+    Fireball,
+    Wall,
+}
+
+impl From<u8> for EntityType {
+    fn from(value: u8) -> Self {
+        use crate::EntityType::*;
+
+        match value {
+            1 => Player,
+            2 => Fireball,
+            3 => Wall,
+            _ => Unknown
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EntityUserData {
+    pub entity_id: EntityId,
+    pub entity_type: EntityType,
+}
+
+impl EntityUserData {
+    pub fn new(id: EntityId, entity_type: EntityType) -> Self {
+        Self { entity_id: id, entity_type }
+    }
+
+    pub fn from_user_data(user_data: u128) -> Self {
+        let entity_id = user_data as u64;
+        let entity_id = EntityId::from_inner(entity_id).unwrap();
+        let entity_type: EntityType = ((user_data >> 64) as u8).into();
+
+        Self {
+            entity_id,
+            entity_type
+        }
+    }
+}
+
+impl Into<u128> for EntityUserData {
+    fn into(self) -> u128 {
+        let entity_id = self.entity_id.inner() as u128;
+        let entity_type = (self.entity_type as u128) << 64;
+        println!("ET: {:?}", entity_type);
+        entity_type | entity_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entity_user_data() {
+        let entity_id = EntityId::from_inner(127).unwrap();
+        let entity_user_data = EntityUserData::new(entity_id, EntityType::Wall);
+
+        let user_data: u128 = entity_user_data.into();
+
+        let e = EntityUserData::from_user_data(user_data);
+        assert_eq!(e.entity_type, EntityType::Wall);
+        assert_eq!(e.entity_id, entity_id);
     }
 }

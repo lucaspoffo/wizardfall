@@ -274,7 +274,7 @@ fn draw_players(
 
 fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     for (_, transform) in (&projectiles, &transform).iter() {
-        draw_rectangle(transform.position.x, - transform.position.y, 16.0, 16.0, RED);
+        draw_rectangle(transform.position.x, -transform.position.y + 16.0, 16.0, 16.0, RED);
     }
 }
 
