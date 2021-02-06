@@ -82,6 +82,38 @@ impl From<u8> for EntityType {
     }
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
+pub struct Health {
+    pub max: u8,
+    pub current: u8
+}
+
+impl Health {
+    pub fn new(max: u8) -> Self {
+        Self {
+            max,
+            current: max,
+        }
+    }
+
+    pub fn take_damage(&mut self, damage: u8) -> bool {
+        if let Some(current) = self.current.checked_sub(damage) {
+            self.current = current;
+            return false;
+        } else {
+            self.current = 0;
+            return true;
+        }
+    }
+
+    pub fn is_dead(&self) -> bool {
+        self.current == 0
+    }
+}
+
+// Used adding aditional info for the colliders.
+// Making it easier to handle collisions.
 #[derive(Debug)]
 pub struct EntityUserData {
     pub entity_id: EntityId,
@@ -109,7 +141,6 @@ impl Into<u128> for EntityUserData {
     fn into(self) -> u128 {
         let entity_id = self.entity_id.inner() as u128;
         let entity_type = (self.entity_type as u128) << 64;
-        println!("ET: {:?}", entity_type);
         entity_type | entity_id
     }
 }

@@ -1,7 +1,7 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels, EntityMapping, Transform,
+    channels, EntityMapping, Transform, Health,
     ldtk::{draw_level, load_project_and_assets},
     animation::{Animation, AnimationController}, 
     player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
@@ -137,7 +137,7 @@ impl App {
         // println!("{:?}", self.world);
         // self.world.run(debug::<Player>);
         // self.world.run(debug::<Projectile>);
-        // self.world.run(debug::<Transform>);
+        // self.world.run(debug::<Health>);
 
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
@@ -219,10 +219,11 @@ fn draw_players(
     player_texture: UniqueView<AnimationTexture>,
     players: View<Player>,
     transforms: View<Transform>,
+    health: View<Health>,
     animation_controller: View<AnimationController>,
 ) {
-    for (player, transform, animation_controller) in
-        (&players, &transforms, &animation_controller).iter()
+    for (player, transform, animation_controller, player_health) in
+        (&players, &transforms, &animation_controller, &health).iter()
     {
         let texture_animation = player_texture.get(&animation_controller.animation).unwrap();
         if animation_controller.frame > texture_animation.h_frames * texture_animation.v_frames {
@@ -269,6 +270,15 @@ fn draw_players(
 
         draw_line(center_x, center_y, wand_x, wand_y, 3.0, YELLOW);
         draw_circle(wand_x, wand_y, 3.0, RED);
+
+        // Draw Player Health
+        let current_life_percent = (player_health.current as f32) / (player_health.max as f32);
+        let max_bar_width = 40.;
+        let bar_width = current_life_percent * max_bar_width;
+        let health_x = x - 5.;
+        let health_y = y - 5.;
+        draw_rectangle(health_x, health_y, max_bar_width, 5., RED);
+        draw_rectangle(health_x, health_y, bar_width, 5., GREEN);
     }
 }
 

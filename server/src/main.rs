@@ -6,7 +6,7 @@ use shared::{
     network::ServerFrame,
     player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
-    Transform, EntityUserData, EntityType
+    EntityType, EntityUserData, Health, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -87,11 +87,9 @@ async fn server(ip: String) -> Result<(), RenetError> {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
                 world
                     .run(
-                        |player_mapping: UniqueView<PlayerMapping>,
-                         entities: EntitiesView,
-                         mut inputs: ViewMut<PlayerInput>| {
+                        |player_mapping: UniqueView<PlayerMapping>, mut inputs: ViewMut<PlayerInput>| {
                             if let Some(entity_id) = player_mapping.get(client_id) {
-                                entities.add_component(*entity_id, &mut inputs, input);
+                                inputs.add_component_unchecked(*entity_id, input);
                             }
                         },
                     )
@@ -115,17 +113,20 @@ async fn server(ip: String) -> Result<(), RenetError> {
         world.run(create_body_and_collider_system).unwrap();
         world.run(create_joints_system).unwrap();
         world.run_with_data(step_world_system, 0.0016666).unwrap();
-        world.run(destroy_body_and_collider_system).unwrap();
 
         world.run(sync_transform_rapier).unwrap();
 
         world.run(render_colliders).unwrap();
         world.run(display_events).unwrap();
-        world.run(remove_dead).unwrap();
+        world.run(remove_zero_health).unwrap();
         // world.run(debug::<Player>).unwrap();
         // world.run(debug::<PlayerInput>).unwrap();
         // world.run(debug::<Transform>).unwrap();
         // world.run(debug::<Velocity>).unwrap();
+        world.run(remove_dead).unwrap();
+        
+        // Remove
+        world.run(destroy_body_and_collider_system).unwrap();
 
         let server_frame = ServerFrame::from_world(&world);
         // println!("{:?}", server_frame);
@@ -182,9 +183,11 @@ fn cast_fireball(
     mut bodies_builder: ViewMut<RigidBodyBuilder>,
 ) {
     if let Some(player_entity) = player_mapping.get(client_id) {
+        if !entities.is_alive(*player_entity) { return; }
+
         let transform = (&transforms).get(*player_entity).unwrap();
 
-        let projectile = Projectile::new(ProjectileType::Fireball);
+        let projectile = Projectile::new(ProjectileType::Fireball, *player_entity);
         let direction = (cast_target.position - transform.position).normalize();
         let rotation = direction.angle_between(Vec2::unit_x());
 
@@ -215,12 +218,15 @@ fn cast_fireball(
 
 fn cast_teleport(
     (client_id, cast_target): (&u64, CastTarget),
+    entities: EntitiesView,
     player_mapping: UniqueView<PlayerMapping>,
     body_handles: View<RigidBodyHandleComponent>,
     mut rigid_bodies: UniqueViewMut<RigidBodySet>,
 ) {
-    if let Some(entity_id) = player_mapping.get(client_id) {
-        if let Ok(rigid_body) = body_handles.get(*entity_id) {
+    if let Some(player_entity) = player_mapping.get(client_id) {
+        if !entities.is_alive(*player_entity) { return; }
+
+        if let Ok(rigid_body) = body_handles.get(*player_entity) {
             if let Some(rb) = rigid_bodies.get_mut(rigid_body.handle()) {
                 let mut pos = *rb.position();
                 pos.translation.x = cast_target.position.x;
@@ -296,6 +302,7 @@ fn create_player(
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
     mut players: ViewMut<Player>,
+    mut health: ViewMut<Health>,
     mut colliders_builder: ViewMut<ColliderBuilder>,
     mut bodies_builder: ViewMut<RigidBodyBuilder>,
     mut animations: ViewMut<AnimationController>,
@@ -310,6 +317,7 @@ fn create_player(
 
     let entity_id = entities.add_entity((), ());
     let user_data = EntityUserData::new(entity_id, EntityType::Player);
+    let player_health = Health::new(255);
 
     let collider_builder = ColliderBuilder::cuboid(16., 24.).user_data(user_data.into());
 
@@ -321,8 +329,16 @@ fn create_player(
             &mut animations,
             &mut bodies_builder,
             &mut colliders_builder,
+            &mut health,
         ),
-        (player, transform, animation, rigid_body, collider_builder),
+        (
+            player,
+            transform,
+            animation,
+            rigid_body,
+            collider_builder,
+            player_health,
+        ),
     );
 
     player_mapping.insert(client_id, entity_id);
@@ -351,6 +367,8 @@ fn display_events(
     entities: EntitiesViewMut,
     events: UniqueViewMut<EventQueue>,
     colliders: UniqueView<ColliderSet>,
+    projectiles: View<Projectile>,
+    mut health: ViewMut<Health>,
     mut deads: ViewMut<Dead>,
 ) {
     while let Ok(intersection_event) = events.intersection_events.pop() {
@@ -359,16 +377,61 @@ fn display_events(
         let entity_data1 = EntityUserData::from_user_data(collider1.user_data);
         let entity_data2 = EntityUserData::from_user_data(collider2.user_data);
         match (&entity_data1, &entity_data2) {
-            (EntityUserData { entity_type: EntityType::Wall, .. },
-             EntityUserData { entity_type: EntityType::Fireball, entity_id: fireball }) 
-            | (EntityUserData { entity_type: EntityType::Fireball, entity_id: fireball },
-             EntityUserData { entity_type: EntityType::Wall, .. }) => {
-                entities.add_component(*fireball,&mut deads, Dead);
+            (
+                EntityUserData {
+                    entity_type: EntityType::Wall,
+                    ..
+                },
+                EntityUserData {
+                    entity_type: EntityType::Fireball,
+                    entity_id: fireball,
+                },
+            )
+            | (
+                EntityUserData {
+                    entity_type: EntityType::Fireball,
+                    entity_id: fireball,
+                },
+                EntityUserData {
+                    entity_type: EntityType::Wall,
+                    ..
+                },
+            ) => {
+                entities.add_component(*fireball, &mut deads, Dead);
+            },
+            (
+                EntityUserData {
+                    entity_type: EntityType::Player,
+                    entity_id: player,
+                },
+                EntityUserData {
+                    entity_type: EntityType::Fireball,
+                    entity_id: fireball,
+                },
+            )
+            | (
+                EntityUserData {
+                    entity_type: EntityType::Fireball,
+                    entity_id: fireball,
+                },
+                EntityUserData {
+                    entity_type: EntityType::Player,
+                    entity_id: player,
+                },
+            ) => {
+                let projectile = projectiles.get(*fireball).unwrap();
+                if projectile.owner == *player {
+                    // Fireball colliding with owner
+                    continue;
+                }
+                let mut health = (&mut health).get(*player).unwrap();
+                health.take_damage(10);
+                entities.add_component(*fireball, &mut deads, Dead);
             }
             _ => {
-                println!("Unhandled collision event\nEntity Type 1: {:?}\nEntityType 2:{:?}",
-                    entity_data1.entity_type,
-                    entity_data2.entity_type
+                println!(
+                    "Unhandled collision event\nEntity Type 1: {:?}\nEntityType 2:{:?}",
+                    entity_data1.entity_type, entity_data2.entity_type
                 );
             }
         }
@@ -395,4 +458,13 @@ fn sync_transform_rapier(
 
 fn remove_dead(mut all_storages: AllStoragesViewMut) {
     all_storages.delete_any::<SparseSet<Dead>>();
+}
+
+fn remove_zero_health(entities: EntitiesViewMut, health: View<Health>, mut deads: ViewMut<Dead>) {
+    for (entity_id, h) in health.iter().with_id() {
+        if h.is_dead() {
+            entities.add_component(entity_id, &mut deads, Dead);
+        }
+    }
+    
 }

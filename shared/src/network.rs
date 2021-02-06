@@ -5,7 +5,7 @@ use shipyard::{
 };
 
 use crate::{
-    Transform, EntityMapping,
+    Transform, EntityMapping, Health,
     player::Player,
     projectile::Projectile,
     animation::AnimationController
@@ -23,6 +23,7 @@ pub trait NetworkState {
 pub struct ServerFrame {
     entities: Vec<EntityId>,
     players: NetworkComponent<Player>,
+    health: NetworkComponent<Health>,
     projectiles: NetworkComponent<Projectile>,
     transforms: NetworkComponent<Transform>,
     animations: NetworkComponent<AnimationController>,
@@ -39,6 +40,7 @@ impl ServerFrame {
             projectiles: NetworkComponent::<Projectile>::from_world(&entities, world),
             transforms: NetworkComponent::<Transform>::from_world(&entities, world),
             animations: NetworkComponent::<AnimationController>::from_world(&entities, world),
+            health: NetworkComponent::<Health>::from_world(&entities, world),
             entities,
         }
     }
@@ -48,6 +50,7 @@ impl ServerFrame {
         self.projectiles.apply_in_world(&self.entities, world);
         self.transforms.apply_in_world(&self.entities, world);
         self.animations.apply_in_world(&self.entities, world);
+        self.health.apply_in_world(&self.entities, world);
 
         // Remove entities that are not in the network frame
         world

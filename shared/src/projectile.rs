@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use shipyard::EntityId;
 
 use derive::NetworkState;
 
@@ -11,13 +12,15 @@ pub enum ProjectileType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Projectile {
-    projectile_type: ProjectileType,
+    pub projectile_type: ProjectileType,
+    pub owner: EntityId,
     pub duration: Duration,
 }
 
 impl Projectile {
-    pub fn new(projectile_type: ProjectileType) -> Self {
+    pub fn new(projectile_type: ProjectileType, owner: EntityId) -> Self {
         Self {
+            owner,
             projectile_type,
             duration: Duration::from_secs(2),
         }
