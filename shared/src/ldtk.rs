@@ -131,6 +131,7 @@ pub fn load_level_collisions(world: &mut World) {
         rect.y *= grid_size.y;
         rect.x += rect.w;
         rect.y += rect.h;
+        rect.y = - rect.y + (grid_size.y * grid_height as f32);
 
         println!("Created collision: {:?}", rect);
         let rigid_body = RigidBodyBuilder::new_static().translation(rect.x, rect.y);
