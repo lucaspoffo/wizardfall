@@ -12,6 +12,7 @@ use shared::{
 use alto_logger::TermLogger;
 use bincode::{deserialize, serialize};
 use renet::{
+    timer::Timer,
     endpoint::EndpointConfig,
     error::RenetError,
     protocol::unsecure::UnsecureServerProtocol,
@@ -48,6 +49,9 @@ async fn main() {
 
 type PlayerMapping = HashMap<u64, EntityId>;
 
+#[derive(Debug, Default)]
+struct PlayerRespawn(HashMap<u64, Timer>);
+
 async fn server(ip: String) -> Result<(), RenetError> {
     let socket = UdpSocket::bind(ip)?;
     let server_config = ServerConfig::default();
@@ -61,6 +65,11 @@ async fn server(ip: String) -> Result<(), RenetError> {
     load_level_collisions(&mut world);
 
     world.add_unique(PlayerMapping::new()).unwrap();
+    world.add_unique(PlayerRespawn::default()).unwrap();
+
+    world.borrow::<ViewMut<Player>>()
+        .unwrap()
+        .track_deletion();
 
     let viewport_height = 592.0;
     let aspect = screen_width() / screen_height();
@@ -104,6 +113,12 @@ async fn server(ip: String) -> Result<(), RenetError> {
             }
         }
 
+        // Repawn player
+        let respawn_players = world.run(player_respawn).unwrap();
+        for client_id in respawn_players.iter() {            
+            world.run_with_data(create_player, *client_id).unwrap();
+        }
+
         // Game logic
         world.run(update_animations).unwrap();
         world.run(update_players).unwrap();
@@ -127,6 +142,8 @@ async fn server(ip: String) -> Result<(), RenetError> {
         
         // Remove
         world.run(destroy_body_and_collider_system).unwrap();
+
+        world.run(add_player_respawn).unwrap();
 
         let server_frame = ServerFrame::from_world(&world);
         // println!("{:?}", server_frame);
@@ -466,5 +483,24 @@ fn remove_zero_health(entities: EntitiesViewMut, health: View<Health>, mut deads
             entities.add_component(entity_id, &mut deads, Dead);
         }
     }
-    
+}
+
+fn add_player_respawn(mut players: ViewMut<Player>, mut player_respawn: UniqueViewMut<PlayerRespawn>) {
+    for (_, player) in players.take_deleted().iter() {        
+        let respawn_timer = Timer::new(Duration::from_secs(5));
+        player_respawn.0.insert(player.client_id, respawn_timer);
+    }
+}
+
+fn player_respawn(mut players: ViewMut<Player>, mut player_respawn: UniqueViewMut<PlayerRespawn>) -> Vec<u64> {
+    let mut respawn_players: Vec<u64> = vec![];
+    for (client_id, timer) in player_respawn.0.iter() {
+        if timer.is_finished() {
+            respawn_players.push(*client_id);
+        }
+    }
+
+    player_respawn.0.retain(|_, timer| !timer.is_finished());
+
+    respawn_players
 }
