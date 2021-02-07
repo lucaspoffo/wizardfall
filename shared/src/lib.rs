@@ -77,16 +77,22 @@ impl From<u8> for EntityType {
             1 => Player,
             2 => Fireball,
             3 => Wall,
-            _ => Unknown
+            _ => Unknown,
         }
     }
 }
 
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct PlayersScore {
+    pub score: HashMap<u64, u8>,
+    pub updated: bool
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Health {
     pub max: u8,
-    pub current: u8
+    pub current: u8,
+    pub killer: Option<u64>,
 }
 
 impl Health {
@@ -94,16 +100,23 @@ impl Health {
         Self {
             max,
             current: max,
+            killer: None,
         }
     }
 
-    pub fn take_damage(&mut self, damage: u8) -> bool {
+    pub fn take_damage(&mut self, damage: u8, damage_dealer: Option<u64>) {
+        if self.is_dead() {
+            return;
+        }
+
         if let Some(current) = self.current.checked_sub(damage) {
             self.current = current;
-            return false;
         } else {
             self.current = 0;
-            return true;
+        }
+
+        if self.is_dead() {
+            self.killer = damage_dealer;
         }
     }
 
@@ -122,7 +135,10 @@ pub struct EntityUserData {
 
 impl EntityUserData {
     pub fn new(id: EntityId, entity_type: EntityType) -> Self {
-        Self { entity_id: id, entity_type }
+        Self {
+            entity_id: id,
+            entity_type,
+        }
     }
 
     pub fn from_user_data(user_data: u128) -> Self {
@@ -132,7 +148,7 @@ impl EntityUserData {
 
         Self {
             entity_id,
-            entity_type
+            entity_type,
         }
     }
 }

@@ -1,12 +1,14 @@
 // use shared::channels;
 use macroquad::prelude::*;
 use shared::{
-    channels, EntityMapping, Transform, Health,
+    animation::{Animation, AnimationController},
+    channels,
     ldtk::{draw_level, load_project_and_assets},
-    animation::{Animation, AnimationController}, 
-    player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
-    projectile::Projectile, 
+    message::ServerMessages,
     network::ServerFrame,
+    player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
+    projectile::Projectile,
+    EntityMapping, Health, PlayersScore, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -18,10 +20,79 @@ use renet::{
 };
 use shipyard::*;
 
-use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{borrow::BorrowMut, collections::HashMap};
+
+#[macroquad::main("Renet macroquad demo")]
+async fn main() {
+    TermLogger::default().init().unwrap();
+    rand::srand(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    );
+
+    let viewport_height = 600.0;
+    let aspect = screen_width() / screen_height();
+    let viewport_width = viewport_height * aspect;
+
+    let camera = Camera2D {
+        zoom: vec2(
+            1.0 / viewport_width as f32 * 2.,
+            -1.0 / viewport_height as f32 * 2.,
+        ),
+        // TODO: remove tile size magic numbers
+        target: vec2(viewport_width / 2. + 16., -viewport_height / 2. + 16.),
+        ..Default::default()
+    };
+
+    let id = rand::rand() as u64;
+    let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
+    let mut app = App::new(id, camera, connection);
+
+    let mapping: EntityMapping = HashMap::new();
+    app.world.add_unique(mapping).unwrap();
+    app.world.add_unique(PlayersScore::default()).unwrap();
+
+    app.load_texture().await;
+
+    load_project_and_assets(&app.world).await;
+
+    loop {
+        clear_background(BLACK);
+
+        app.update().await;
+
+        next_frame().await
+    }
+}
+
+fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
+    let socket = UdpSocket::bind("127.0.0.1:0")?;
+    let endpoint_config = EndpointConfig::default();
+
+    println!("Client ID: {}", id);
+
+    let mut request_connection = RequestConnection::new(
+        id,
+        socket,
+        ip.parse().unwrap(),
+        Box::new(UnsecureClientProtocol::new(id)),
+        endpoint_config,
+        channels(),
+    )?;
+
+    loop {
+        println!("Connecting with server.");
+        if let Some(connection) = request_connection.update()? {
+            return Ok(connection);
+        };
+        sleep(Duration::from_millis(20));
+    }
+}
 
 struct App {
     id: u64,
@@ -77,6 +148,8 @@ impl App {
     }
 
     async fn update(&mut self) {
+        set_camera(self.camera);
+
         let up = is_key_down(KeyCode::W) || is_key_down(KeyCode::Up);
         let down = is_key_down(KeyCode::S) || is_key_down(KeyCode::Down);
         let left = is_key_down(KeyCode::A) || is_key_down(KeyCode::Left);
@@ -84,7 +157,10 @@ impl App {
 
         let mut mouse_world_position = self.camera.screen_to_world(mouse_position().into());
         mouse_world_position.y *= -1.;
-        let direction = self.world.run_with_data(player_direction, (self.id, mouse_world_position)).unwrap();
+        let direction = self
+            .world
+            .run_with_data(player_direction, (self.id, mouse_world_position))
+            .unwrap();
         let input = PlayerInput {
             up,
             down,
@@ -92,7 +168,6 @@ impl App {
             right,
             direction,
         };
-
 
         if is_mouse_button_pressed(MouseButton::Left) {
             let cast_target = CastTarget {
@@ -134,6 +209,16 @@ impl App {
             server_frame.apply_in_world(&self.world);
         }
 
+        for payload in self.connection.receive_all_messages_from_channel(2).iter() {
+            let server_message: ServerMessages =
+                bincode::deserialize(payload).expect("Failed to deserialize state.");
+            match server_message {
+                ServerMessages::UpdateScore(score) => {
+                    let mut player_scores = self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
+                    player_scores.score = score.score;
+                }
+            }
+        }
         // println!("{:?}", self.world);
         // self.world.run(debug::<Player>);
         // self.world.run(debug::<Projectile>);
@@ -142,76 +227,19 @@ impl App {
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
+
+        set_default_camera();
+        self.world.run(draw_score).unwrap();
     }
 }
 
-#[macroquad::main("Renet macroquad demo")]
-async fn main() {
-    TermLogger::default().init().unwrap();
-    rand::srand(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    );
-
-    let viewport_height = 600.0;
-    let aspect = screen_width() / screen_height();
-    let viewport_width = viewport_height * aspect;
-
-    let camera = Camera2D {
-        zoom: vec2(
-            1.0 / viewport_width as f32 * 2.,
-            -1.0 / viewport_height as f32 * 2.,
-        ),
-        // TODO: remove tile size magic numbers
-        target: vec2(viewport_width / 2. + 16., -viewport_height / 2. + 16.),
-        ..Default::default()
-    };
-
-    let id = rand::rand() as u64;
-    let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
-    let mut app = App::new(id, camera, connection);
-
-    let mapping: EntityMapping = HashMap::new();
-    app.world.add_unique(mapping).unwrap();
-
-    app.load_texture().await;
-
-    load_project_and_assets(&app.world).await;
-
-    loop {
-        clear_background(BLACK);
-
-        set_camera(app.camera);
-
-        app.update().await;
-
-        next_frame().await
-    }
-}
-
-fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
-    let socket = UdpSocket::bind("127.0.0.1:0")?;
-    let endpoint_config = EndpointConfig::default();
-
-    println!("Client ID: {}", id);
-
-    let mut request_connection = RequestConnection::new(
-        id,
-        socket,
-        ip.parse().unwrap(),
-        Box::new(UnsecureClientProtocol::new(id)),
-        endpoint_config,
-        channels(),
-    )?;
-
-    loop {
-        println!("Connecting with server.");
-        if let Some(connection) = request_connection.update()? {
-            return Ok(connection);
-        };
-        sleep(Duration::from_millis(20));
+fn draw_score(players_score: UniqueView<PlayersScore>) {
+    let mut offset_x = 0.;
+    for (client_id, score) in players_score.score.iter() {
+        let text = format!("{}: {}", client_id, score);
+        draw_rectangle_lines(27. + offset_x, 23., 190., 40., 1., WHITE);
+        draw_text(&text, 30. + offset_x, 20., 30., WHITE);
+        offset_x += 200.;
     }
 }
 
@@ -246,7 +274,7 @@ fn draw_players(
         );
 
         let x = transform.position.x;
-        let y = - transform.position.y;
+        let y = -transform.position.y;
 
         let mut params = DrawTextureParams::default();
         params.source = Some(draw_rect);
@@ -284,11 +312,21 @@ fn draw_players(
 
 fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     for (_, transform) in (&projectiles, &transform).iter() {
-        draw_rectangle(transform.position.x, -transform.position.y + 16.0, 16.0, 16.0, RED);
+        draw_rectangle(
+            transform.position.x,
+            -transform.position.y + 16.0,
+            16.0,
+            16.0,
+            RED,
+        );
     }
 }
 
-fn player_direction((client_id, mouse_world_position): (u64, Vec2), players: View<Player>, transforms: View<Transform>) -> Vec2 {
+fn player_direction(
+    (client_id, mouse_world_position): (u64, Vec2),
+    players: View<Player>,
+    transforms: View<Transform>,
+) -> Vec2 {
     for (player, transform) in (&players, &transforms).iter() {
         if player.client_id == client_id {
             return (mouse_world_position - transform.position).normalize();
@@ -304,4 +342,3 @@ fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
         println!("[Debug] {:?}: {:?}", entity_id, component);
     }
 }
-

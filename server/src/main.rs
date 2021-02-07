@@ -3,20 +3,21 @@ use shared::{
     animation::AnimationController,
     channels,
     ldtk::{load_level_collisions, PlayerRespawnPoints},
+    message::ServerMessages,
     network::ServerFrame,
     player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
-    EntityType, EntityUserData, Health, Transform,
+    EntityType, EntityUserData, Health, PlayersScore, Transform,
 };
 
 use alto_logger::TermLogger;
 use bincode::{deserialize, serialize};
 use renet::{
-    timer::Timer,
     endpoint::EndpointConfig,
     error::RenetError,
     protocol::unsecure::UnsecureServerProtocol,
     server::{Server, ServerConfig, ServerEvent},
+    timer::Timer,
 };
 use shipyard_rapier2d::{
     na::Vector2,
@@ -49,7 +50,6 @@ async fn main() {
 
 type PlayerMapping = HashMap<u64, EntityId>;
 
-
 #[derive(Debug, Default)]
 struct PlayerRespawn(HashMap<u64, Timer>);
 
@@ -67,10 +67,9 @@ async fn server(ip: String) -> Result<(), RenetError> {
 
     world.add_unique(PlayerMapping::new()).unwrap();
     world.add_unique(PlayerRespawn::default()).unwrap();
+    world.add_unique(PlayersScore::default()).unwrap();
 
-    world.borrow::<ViewMut<Player>>()
-        .unwrap()
-        .track_deletion();
+    world.borrow::<ViewMut<Player>>().unwrap().track_deletion();
 
     let viewport_height = 592.0;
     let aspect = screen_width() / screen_height();
@@ -97,7 +96,8 @@ async fn server(ip: String) -> Result<(), RenetError> {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
                 world
                     .run(
-                        |player_mapping: UniqueView<PlayerMapping>, mut inputs: ViewMut<PlayerInput>| {
+                        |player_mapping: UniqueView<PlayerMapping>,
+                         mut inputs: ViewMut<PlayerInput>| {
                             if let Some(entity_id) = player_mapping.get(client_id) {
                                 inputs.add_component_unchecked(*entity_id, input);
                             }
@@ -116,7 +116,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
 
         // Repawn player
         let respawn_players = world.run(player_respawn).unwrap();
-        for client_id in respawn_players.iter() {            
+        for client_id in respawn_players.iter() {
             world.run_with_data(create_player, *client_id).unwrap();
         }
 
@@ -140,7 +140,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
         // world.run(debug::<Transform>).unwrap();
         // world.run(debug::<Velocity>).unwrap();
         world.run(remove_dead).unwrap();
-        
+
         // Remove
         world.run(destroy_body_and_collider_system).unwrap();
 
@@ -155,13 +155,36 @@ async fn server(ip: String) -> Result<(), RenetError> {
         server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
         server.send_packets();
 
+        // Serd score update to clients
+        {
+            let mut score = world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
+            if score.updated {
+                let score_message = ServerMessages::UpdateScore((*score).clone());
+                let score_message = serialize(&score_message).expect("Failed to serialize score");
+                server.send_message_to_all_clients(2, score_message.into_boxed_slice());
+                score.updated = false;
+            }
+        }
+
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected(id) => {
                     world.run_with_data(create_player, id).unwrap();
+                    world
+                        .run(|mut players_score: UniqueViewMut<PlayersScore>| {
+                            players_score.score.insert(id, 0);
+                            players_score.updated = true;
+                        })
+                        .unwrap();
                 }
                 ServerEvent::ClientDisconnected(id) => {
                     world.run_with_data(remove_player, id).unwrap();
+                    world
+                        .run(|mut players_score: UniqueViewMut<PlayersScore>| {
+                            players_score.score.remove(&id);
+                            players_score.updated = true;
+                        })
+                        .unwrap();
                 }
             }
         }
@@ -201,7 +224,9 @@ fn cast_fireball(
     mut bodies_builder: ViewMut<RigidBodyBuilder>,
 ) {
     if let Some(player_entity) = player_mapping.get(client_id) {
-        if !entities.is_alive(*player_entity) { return; }
+        if !entities.is_alive(*player_entity) {
+            return;
+        }
 
         let transform = (&transforms).get(*player_entity).unwrap();
 
@@ -242,7 +267,9 @@ fn cast_teleport(
     mut rigid_bodies: UniqueViewMut<RigidBodySet>,
 ) {
     if let Some(player_entity) = player_mapping.get(client_id) {
-        if !entities.is_alive(*player_entity) { return; }
+        if !entities.is_alive(*player_entity) {
+            return;
+        }
 
         if let Ok(rigid_body) = body_handles.get(*player_entity) {
             if let Some(rb) = rigid_bodies.get_mut(rigid_body.handle()) {
@@ -331,7 +358,8 @@ fn create_player(
     let transform = Transform::default();
     let animation = PlayerAnimation::Idle.get_animation_controller();
 
-    let player_position = player_respawn_points.0[rand::rand() as usize % player_respawn_points.0.len()];
+    let player_position =
+        player_respawn_points.0[rand::rand() as usize % player_respawn_points.0.len()];
 
     let rigid_body = RigidBodyBuilder::new_dynamic()
         .lock_rotations()
@@ -368,8 +396,8 @@ fn create_player(
 
 fn remove_player(client_id: u64, mut all_storages: AllStoragesViewMut) {
     let player_entity_id = {
-        let player_mapping = all_storages.borrow::<UniqueView<PlayerMapping>>().unwrap();
-        player_mapping.get(&client_id).copied()
+        let mut player_mapping = all_storages.borrow::<UniqueViewMut<PlayerMapping>>().unwrap();
+        player_mapping.remove(&client_id)
     };
     if let Some(entity_id) = player_entity_id {
         all_storages.delete_entity(entity_id);
@@ -389,6 +417,7 @@ fn display_events(
     events: UniqueViewMut<EventQueue>,
     colliders: UniqueView<ColliderSet>,
     projectiles: View<Projectile>,
+    player_mapping: UniqueView<PlayerMapping>,
     mut health: ViewMut<Health>,
     mut deads: ViewMut<Dead>,
 ) {
@@ -419,7 +448,7 @@ fn display_events(
                 },
             ) => {
                 deads.add_component_unchecked(*fireball, Dead);
-            },
+            }
             (
                 EntityUserData {
                     entity_type: EntityType::Player,
@@ -446,7 +475,11 @@ fn display_events(
                     continue;
                 }
                 let mut health = (&mut health).get(*player).unwrap();
-                health.take_damage(10);
+                let client_id = player_mapping
+                    .iter()
+                    .find(|(_, v)| *v == player)
+                    .map(|(k, _)| *k);
+                health.take_damage(10, client_id);
                 deads.add_component_unchecked(*fireball, Dead);
             }
             _ => {
@@ -481,18 +514,36 @@ fn remove_dead(mut all_storages: AllStoragesViewMut) {
     all_storages.delete_any::<SparseSet<Dead>>();
 }
 
-fn remove_zero_health(entities: EntitiesViewMut, health: View<Health>, mut deads: ViewMut<Dead>) {
+fn remove_zero_health(
+    health: View<Health>,
+    players: View<Player>,
+    mut deads: ViewMut<Dead>,
+    mut players_score: UniqueViewMut<PlayersScore>,
+) {
     for (entity_id, h) in health.iter().with_id() {
         if h.is_dead() {
-            entities.add_component(entity_id, &mut deads, Dead);
+            deads.add_entity(entity_id, Dead);
+            if let Ok(_) = players.get(entity_id) {
+                if let Some(killer) = h.killer {
+                    let score = players_score.score.entry(killer).or_insert(0);
+                    *score += 1;
+                    players_score.updated = true;
+                }
+            }
         }
     }
 }
 
-fn add_player_respawn(mut players: ViewMut<Player>, mut player_respawn: UniqueViewMut<PlayerRespawn>) {
-    for (_, player) in players.take_deleted().iter() {        
-        let respawn_timer = Timer::new(Duration::from_secs(5));
-        player_respawn.0.insert(player.client_id, respawn_timer);
+fn add_player_respawn(
+    player_mapping: UniqueView<PlayerMapping>,
+    mut players: ViewMut<Player>,
+    mut player_respawn: UniqueViewMut<PlayerRespawn>,
+) {
+    for (_, player) in players.take_deleted().iter() {
+        if player_mapping.get(&player.client_id).is_some() {
+            let respawn_timer = Timer::new(Duration::from_secs(5));
+            player_respawn.0.insert(player.client_id, respawn_timer);
+        }
     }
 }
 
