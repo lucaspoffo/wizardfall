@@ -7,6 +7,7 @@ use shared::{
     network::ServerFrame,
     player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
+    timer::Timer,
     EntityType, EntityUserData, Health, PlayersScore, Transform,
 };
 
@@ -17,7 +18,6 @@ use renet::{
     error::RenetError,
     protocol::unsecure::UnsecureServerProtocol,
     server::{Server, ServerConfig, ServerEvent},
-    timer::Timer,
 };
 use shipyard_rapier2d::{
     na::Vector2,
@@ -121,6 +121,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
         }
 
         // Game logic
+        world.run(update_players_cooldown).unwrap();
         world.run(update_animations).unwrap();
         world.run(update_players).unwrap();
         world.run(update_projectiles).unwrap();
@@ -217,6 +218,7 @@ fn handle_player_action(world: &mut World, player_action: PlayerAction, client_i
 fn cast_fireball(
     (client_id, cast_target): (&u64, CastTarget),
     player_mapping: UniqueView<PlayerMapping>,
+    mut players: ViewMut<Player>,
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
     mut projectiles: ViewMut<Projectile>,
@@ -226,6 +228,14 @@ fn cast_fireball(
     if let Some(player_entity) = player_mapping.get(client_id) {
         if !entities.is_alive(*player_entity) {
             return;
+        }
+
+        // Fireball cooldown
+        let mut player = (&mut players).get(*player_entity).unwrap();
+        if !player.fireball_cooldown.is_finished() {
+            return;
+        } else {
+            player.fireball_cooldown.reset();
         }
 
         let transform = (&transforms).get(*player_entity).unwrap();
@@ -262,6 +272,7 @@ fn cast_fireball(
 fn cast_teleport(
     (client_id, cast_target): (&u64, CastTarget),
     entities: EntitiesView,
+    mut players: ViewMut<Player>,
     player_mapping: UniqueView<PlayerMapping>,
     body_handles: View<RigidBodyHandleComponent>,
     mut rigid_bodies: UniqueViewMut<RigidBodySet>,
@@ -269,6 +280,15 @@ fn cast_teleport(
     if let Some(player_entity) = player_mapping.get(client_id) {
         if !entities.is_alive(*player_entity) {
             return;
+        }
+
+        // Teleport cooldown
+        // TODO: add util for this
+        let mut player = (&mut players).get(*player_entity).unwrap();
+        if !player.teleport_cooldown.is_finished() {
+            return;
+        } else {
+            player.teleport_cooldown.reset();
         }
 
         if let Ok(rigid_body) = body_handles.get(*player_entity) {
@@ -339,6 +359,13 @@ fn update_players(
         } else {
             animation.change_animation(PlayerAnimation::Idle.into());
         }
+    }
+}
+
+fn update_players_cooldown(mut players: ViewMut<Player>) {
+    for mut player in (&mut players).iter() {
+        player.fireball_cooldown.update(get_frame_time());
+        player.teleport_cooldown.update(get_frame_time());
     }
 }
 

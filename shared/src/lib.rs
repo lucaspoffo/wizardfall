@@ -16,6 +16,7 @@ pub mod message;
 pub mod network;
 pub mod player;
 pub mod projectile;
+pub mod timer;
 
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;

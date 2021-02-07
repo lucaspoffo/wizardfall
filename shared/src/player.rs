@@ -1,24 +1,40 @@
 use serde::{Deserialize, Serialize};
 use glam::Vec2; 
 
+use crate::{
+    animation::{Animation, AnimationController},
+    timer::TimerSimple,
+};
+
 use derive::NetworkState;
-use crate::animation::{Animation, AnimationController};
 
 #[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Player {
     pub client_id: u64,
     pub direction: Vec2,
+    pub fireball_cooldown: TimerSimple,
+    pub teleport_cooldown: TimerSimple,
 }
 
 impl Player {
     pub fn new(client_id: u64) -> Self {
+        let mut fireball_cooldown = TimerSimple::new(0.5);
+        fireball_cooldown.finish();
+
+        let mut teleport_cooldown = TimerSimple::new(4.);
+        teleport_cooldown.finish();
+
         Self {
             client_id,
             direction: Vec2::zero(),
+            fireball_cooldown,
+            teleport_cooldown,
         }
     }
 }
 
+// TODO: add firing bool so we can keep mouse left pressed
+// to keep casting fireball.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerInput {
     pub up: bool,
