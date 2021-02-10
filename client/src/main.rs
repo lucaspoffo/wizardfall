@@ -23,7 +23,7 @@ use shipyard::*;
 use std::net::UdpSocket;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{borrow::BorrowMut, collections::HashMap};
+use std::collections::HashMap;
 
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {
@@ -35,23 +35,9 @@ async fn main() {
             .as_secs(),
     );
 
-    let viewport_height = 600.0;
-    let aspect = screen_width() / screen_height();
-    let viewport_width = viewport_height * aspect;
-
-    let camera = Camera2D {
-        zoom: vec2(
-            1.0 / viewport_width as f32 * 2.,
-            -1.0 / viewport_height as f32 * 2.,
-        ),
-        // TODO: remove tile size magic numbers
-        target: vec2(viewport_width / 2. + 16., -viewport_height / 2. + 16.),
-        ..Default::default()
-    };
-
     let id = rand::rand() as u64;
     let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
-    let mut app = App::new(id, camera, connection);
+    let mut app = App::new(id, connection);
 
     let mapping: EntityMapping = HashMap::new();
     app.world.add_unique(mapping).unwrap();
@@ -98,6 +84,7 @@ struct App {
     id: u64,
     world: World,
     camera: Camera2D,
+    render_target: RenderTarget,
     connection: ClientConnected,
 }
 
@@ -124,9 +111,23 @@ impl TextureAnimation {
 }
 
 impl App {
-    fn new(id: u64, camera: Camera2D, connection: ClientConnected) -> Self {
+    fn new(id: u64, connection: ClientConnected) -> Self {
+        let render_target = render_target(640, 368);
+        set_texture_filter(render_target.texture, FilterMode::Nearest);
+
+        let camera = Camera2D {
+            zoom: vec2(
+                1.0 / 640. * 2.,
+                1.0 /  320. * 2.,
+            ),
+            render_target: Some(render_target),
+            target: vec2(320., -160.),
+            ..Default::default()
+        };
+
         let world = World::new();
         Self {
+            render_target,
             id,
             world,
             camera,
@@ -137,7 +138,9 @@ impl App {
     async fn load_texture(&mut self) {
         let mut animations: AnimationTexture = HashMap::new();
         let idle_texture: Texture2D = load_texture("Blue_witch/B_witch_idle.png").await;
+        set_texture_filter(idle_texture, FilterMode::Nearest);
         let run_texture: Texture2D = load_texture("Blue_witch/B_witch_run.png").await;
+        set_texture_filter(run_texture, FilterMode::Nearest);
 
         let idle_animation = TextureAnimation::new(idle_texture, 32, 48, 1, 6);
         let run_animation = TextureAnimation::new(run_texture, 32, 48, 1, 8);
@@ -149,6 +152,7 @@ impl App {
 
     async fn update(&mut self) {
         set_camera(self.camera);
+        clear_background(BLACK);
 
         let up = is_key_down(KeyCode::W) || is_key_down(KeyCode::Up);
         let down = is_key_down(KeyCode::S) || is_key_down(KeyCode::Down);
@@ -156,7 +160,7 @@ impl App {
         let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
 
         let mut mouse_world_position = self.camera.screen_to_world(mouse_position().into());
-        mouse_world_position.y *= -1.;
+        mouse_world_position.y = 320. + mouse_world_position.y;
         let direction = self
             .world
             .run_with_data(player_direction, (self.id, mouse_world_position))
@@ -214,7 +218,8 @@ impl App {
                 bincode::deserialize(payload).expect("Failed to deserialize state.");
             match server_message {
                 ServerMessages::UpdateScore(score) => {
-                    let mut player_scores = self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
+                    let mut player_scores =
+                        self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
                     player_scores.score = score.score;
                 }
             }
@@ -227,8 +232,37 @@ impl App {
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
-
+        
         set_default_camera();
+        clear_background(RED);
+
+        let desired_aspect_ratio = 640. / 320.;
+        let current_aspect_ratio = screen_width() / screen_height();
+        let mut viewport_height = screen_width() / desired_aspect_ratio;
+        let mut viewport_width = screen_height() * desired_aspect_ratio;
+        let mut draw_x = 0.;
+        let mut draw_y = 0.;
+
+        if current_aspect_ratio > desired_aspect_ratio {
+            viewport_height = screen_height();
+            draw_x = (screen_width() - viewport_width) / 2.;
+        } else if current_aspect_ratio < desired_aspect_ratio {
+            viewport_width = screen_width();
+            draw_y = (screen_height() - viewport_height) / 2.;
+        }
+
+        draw_texture_ex(
+            self.render_target.texture,
+            draw_x,
+            draw_y,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(viewport_width, viewport_height)),
+                ..Default::default()
+            },
+        );
+
+
         self.world.run(draw_score).unwrap();
     }
 }

@@ -1,4 +1,4 @@
-use ldtk_rust::{LayerInstance, Project, TileInstance};
+use ldtk_rust::{LayerInstance, Level, Project, TileInstance};
 use macroquad::prelude::*;
 use shipyard::{UniqueView, World};
 
@@ -14,8 +14,6 @@ pub struct TextureAtlas {
     tile_size: Vec2,
     grid_size: Vec2,
 }
-
-const PATH_ROOT: &str = "../levels/";
 
 impl TextureAtlas {
     pub fn new(texture: Texture2D, tile_size: Vec2, grid_size: Vec2) -> Self {
@@ -47,8 +45,8 @@ impl TextureAtlas {
         }
 
         let mut dest_size = self.tile_size;
-        let pos_x = (tile.px[0] as f32) + self.tile_size.x;
-        let pos_y = (tile.px[1] - grid_height) as f32 + self.tile_size.y;
+        let pos_x = tile.px[0] as f32;
+        let pos_y = (tile.px[1] - grid_height) as f32;
         let mut draw_pos = vec2(pos_x, pos_y);
         if flip_x {
             dest_size.x *= -1.0;
@@ -70,8 +68,11 @@ impl TextureAtlas {
     }
 }
 
+const BASE_DIR: &str = "../levels/";
+const PROJECT_FILE: &str = "Typical_TopDown_example.ldtk";
+
 pub fn load_project() -> Project {
-    Project::new("../levels/Typical_TopDown_example.ldtk".to_string())
+    Project::new(BASE_DIR.to_owned() + PROJECT_FILE)
 }
 
 #[derive(Debug)]
@@ -81,9 +82,10 @@ pub async fn load_project_and_assets(world: &World) {
     let project = load_project();
     let mut sprite_sheets = SpriteSheets(HashMap::new());
     for tileset in project.defs.as_ref().unwrap().tilesets.iter() {
-        let texture_path = format!("{}{}", PATH_ROOT, &tileset.rel_path[..]);
+        let texture_path = format!("{}{}", BASE_DIR, &tileset.rel_path[..]);
         println!("Texture path: {}", texture_path);
         let texture = load_texture(&texture_path).await;
+        set_texture_filter(texture, FilterMode::Nearest);
 
         let tile_size = Vec2::new(tileset.tile_grid_size as f32, tileset.tile_grid_size as f32);
         let grid_size = vec2(
@@ -104,12 +106,12 @@ pub struct PlayerRespawnPoints(pub Vec<Vec2>);
 // This is an util to fix the y position for the entities loaded from LDtk
 // The rapier physics engine uses an inverted Y axis compared to the level editor.
 fn fix_y_axis(layer: &LayerInstance, value: f32) -> f32 {
-    - value + (layer.grid_size * layer.c_hei) as f32
+    -value + (layer.grid_size * layer.c_hei) as f32
 }
 
 pub fn load_level_collisions(world: &mut World) {
     let project = load_project();
-
+    
     let entity_layer = project.levels[0]
         .layer_instances
         .as_ref()
@@ -117,13 +119,16 @@ pub fn load_level_collisions(world: &mut World) {
         .iter()
         .find(|l| l.identifier == "Entities".to_string())
         .unwrap();
-    
+
     let mut player_respawn_points = PlayerRespawnPoints(vec![]);
 
     for entity in entity_layer.entity_instances.iter() {
         println!("Entity identifier: {}", entity.identifier);
         println!("Entity px: {:?}", entity.px);
-        player_respawn_points.0.push(vec2(entity.px[0] as f32, fix_y_axis(entity_layer, entity.px[1] as f32)));
+        player_respawn_points.0.push(vec2(
+            entity.px[0] as f32,
+            fix_y_axis(entity_layer, entity.px[1] as f32),
+        ));
     }
 
     world.add_unique(player_respawn_points).unwrap();
@@ -152,13 +157,14 @@ pub fn load_level_collisions(world: &mut World) {
     let mut rects = collapse(collisions, grid_width, grid_height);
 
     for mut rect in rects.iter_mut() {
+        println!("B) Created collision: {:?}", rect);
         rect.h *= grid_size.x / 2.0;
         rect.w *= grid_size.y / 2.0;
         rect.x *= grid_size.x;
         rect.y *= grid_size.y;
-        rect.x += rect.w;
-        rect.y += rect.h;
-        rect.y = fix_y_axis(collision_layer, rect.y); 
+        rect.x = rect.x + rect.w - grid_size.x;
+        rect.y = rect.y + rect.h - grid_size.y;
+        rect.y = fix_y_axis(collision_layer, rect.y);
         println!("Created collision: {:?}", rect);
         let rigid_body = RigidBodyBuilder::new_static().translation(rect.x, rect.y);
 
@@ -183,6 +189,7 @@ pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<Sprite
         // If there's no tileset, it's value is set to -1, which could be used
         // as a check. Currently it is used only as a key to the hash of asset
         // handles.
+        println!("{:?}", layer.tileset_def_uid);
         let tileset_uid = layer.tileset_def_uid.unwrap_or(-1);
         let sprite_sheet = match sprite_sheets.0.get(&tileset_uid) {
             Some(x) => x,
@@ -191,6 +198,7 @@ pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<Sprite
 
         let grid_height = layer.c_hei * layer.grid_size;
         // Finally we match on the four possible kinds of Layer Instances and
+        println!("Layer instance type: {}", layer.layer_instance_type);
         // handle each accordingly.
         match &layer.layer_instance_type[..] {
             "Tiles" => {
@@ -201,6 +209,12 @@ pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<Sprite
             }
             "AutoLayer" => {
                 //println!("Generating AutoTile Layer: {}", layer.identifier);
+                for tile in layer.auto_layer_tiles.iter() {
+                    sprite_sheet.draw_tile(&tile, grid_height);
+                }
+            }
+            "IntGrid" => {
+                // println!("Generating Entities Layer: {}", layer.identifier);
                 for tile in layer.auto_layer_tiles.iter() {
                     sprite_sheet.draw_tile(&tile, grid_height);
                 }
@@ -340,3 +354,4 @@ mod tests {
         assert_eq!(rects[1].h, 1.0);
     }
 }
+

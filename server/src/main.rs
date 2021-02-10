@@ -20,14 +20,16 @@ use renet::{
     server::{Server, ServerConfig, ServerEvent},
 };
 use shipyard_rapier2d::{
-    na::Vector2,
+    na::{Vector2, Point2},
     physics::{
         create_body_and_collider_system, create_joints_system, destroy_body_and_collider_system,
-        setup_physics, step_world_system, EventQueue, RigidBodyHandleComponent,
+        setup_physics, step_world_system, EventQueue, RapierConfiguration,
+        RigidBodyHandleComponent,
     },
     rapier::{
         dynamics::{RigidBodyBuilder, RigidBodySet},
-        geometry::{ColliderBuilder, ColliderSet},
+        geometry::{ColliderBuilder, ColliderSet, Ray, InteractionGroups},
+        pipeline::QueryPipeline
     },
     render::render_colliders,
 };
@@ -63,6 +65,12 @@ async fn server(ip: String) -> Result<(), RenetError> {
 
     let mut world = World::new();
     world.run(setup_physics).unwrap();
+
+    world
+        .run(|mut rapier_config: UniqueViewMut<RapierConfiguration>| {
+            rapier_config.gravity = Vector2::new(0., 0.);
+        })
+        .unwrap();
     load_level_collisions(&mut world);
 
     world.add_unique(PlayerMapping::new()).unwrap();
@@ -71,7 +79,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
 
     world.borrow::<ViewMut<Player>>().unwrap().track_deletion();
 
-    let viewport_height = 592.0;
+    let viewport_height = 600.0;
     let aspect = screen_width() / screen_height();
     let viewport_width = viewport_height * aspect;
 
@@ -81,7 +89,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
             -1.0 / viewport_height as f32 * 2.,
         ),
         // TODO: remove tile size magic numbers
-        target: vec2(viewport_width / 2., -viewport_height / 2.),
+        target: vec2(viewport_width / 2. - 100., -viewport_height / 2.),
         ..Default::default()
     };
 
@@ -346,7 +354,7 @@ fn update_players(
         if let Some(rb) = rigid_bodies.get_mut(body_handle.handle()) {
             if movement_direction.magnitude() != 0.0 {
                 movement_direction = movement_direction.normalize();
-                rb.set_linvel(movement_direction * 300.0, true);
+                rb.set_linvel(movement_direction * 170.0, true);
             } else {
                 rb.set_linvel(Vector2::zeros(), true);
             }
@@ -423,7 +431,9 @@ fn create_player(
 
 fn remove_player(client_id: u64, mut all_storages: AllStoragesViewMut) {
     let player_entity_id = {
-        let mut player_mapping = all_storages.borrow::<UniqueViewMut<PlayerMapping>>().unwrap();
+        let mut player_mapping = all_storages
+            .borrow::<UniqueViewMut<PlayerMapping>>()
+            .unwrap();
         player_mapping.remove(&client_id)
     };
     if let Some(entity_id) = player_entity_id {
