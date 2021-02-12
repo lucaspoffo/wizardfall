@@ -188,11 +188,6 @@ fn handle_player_action(world: &mut World, player_action: PlayerAction, client_i
                 .run_with_data(cast_fireball, (client_id, cast_target))
                 .unwrap();
         }
-        PlayerAction::CastTeleport(cast_target) => {
-            world
-                .run_with_data(cast_teleport, (client_id, cast_target))
-                .unwrap();
-        }
     }
 }
 
@@ -233,28 +228,6 @@ fn cast_fireball(
             (&mut projectiles, &mut transforms),
             (projectile, transform),
         );
-    }
-}
-
-fn cast_teleport(
-    (client_id, cast_target): (&u64, CastTarget),
-    entities: EntitiesView,
-    mut players: ViewMut<Player>,
-    player_mapping: UniqueView<PlayerMapping>,
-) {
-    if let Some(player_entity) = player_mapping.get(client_id) {
-        if !entities.is_alive(*player_entity) {
-            return;
-        }
-
-        // Teleport cooldown
-        // TODO: add util for this
-        let mut player = (&mut players).get(*player_entity).unwrap();
-        if !player.teleport_cooldown.is_finished() {
-            return;
-        } else {
-            player.teleport_cooldown.reset();
-        }
     }
 }
 
@@ -324,11 +297,10 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
             for (player_id, player) in players.iter().with_id() {
                 if player_id != projectile.owner {
                     if physics.overlaps_actor(entity_id, player_id) {
-                         // With we are hitting a player we always have an entity_id
+                        // With we are hitting a player we always have an entity_id
                         let mut health = (&mut health).get(player_id).unwrap();
                         health.take_damage(10, Some(player.client_id));
                         deads.add_component_unchecked(entity_id, Dead);
-
                     }
                 }
             }
@@ -349,32 +321,58 @@ fn update_players(
         (&mut players, &inputs, &mut animations).iter().with_id()
     {
         let x = (input.right as i8 - input.left as i8) as f32;
-        let y = (input.up as i8 - input.down as i8) as f32;
+        let y = (input.down as i8 - input.up as i8) as f32;
         let movement_direction = vec2(x, y);
-        player.direction = input.direction;
+        player.direction = if input.direction.length() != 0.0 {
+            input.direction.normalize()
+        } else {
+            input.direction
+        };
+        
+        if input.dash && player.dash_cooldown.is_finished() {
+            player.dash_cooldown.reset();
+            player.current_dash_duration = player.dash_duration;
+
+            // If there is no player input use player facing direction
+            let dash_direction = if movement_direction.length() != 0.0 {
+                movement_direction.normalize()
+            } else {
+                vec2(input.direction.x.signum(), 0.)
+            };
+            player.speed = dash_direction * 300.;
+        }
 
         let pos = physics.actor_pos(entity_id);
         let on_ground = physics
             .collide_check(entity_id, pos + vec2(0., 1.))
             .is_some();
 
-        if !on_ground {
-            player.speed.y += 500. * get_frame_time();
+        if player.current_dash_duration > 0.0 {
+            player.current_dash_duration -= get_frame_time();
+            if player.current_dash_duration <= 0.0 {
+                player.speed = player.speed.normalize() * 100.;
+            }
         } else {
-            player.speed.y = 500. * get_frame_time();
-        }
+            if !on_ground {
+                player.speed.y += 1000. * get_frame_time();
+            } else {
+                player.speed.y = 500. * get_frame_time();
+            }
 
-        player.speed.x = movement_direction.x * 100.;
-        if input.jump && on_ground {
-            player.speed.y = -270.;
+            player.speed.x = movement_direction.x * 100.;
+            if input.jump && on_ground {
+                player.speed.y = -360.;
+            }
         }
 
         if let Some(hit_collision) = physics.move_h(entity_id, player.speed.x * get_frame_time()) {
+            player.current_dash_duration = 0.;
             match hit_collision.entity_type {
                 _ => {}
             }
         }
         if let Some(hit_collision) = physics.move_v(entity_id, player.speed.y * get_frame_time()) {
+            player.current_dash_duration = 0.;
             match hit_collision.entity_type {
                 _ => {}
             }
@@ -392,7 +390,7 @@ fn update_players(
 fn update_players_cooldown(mut players: ViewMut<Player>) {
     for mut player in (&mut players).iter() {
         player.fireball_cooldown.update(get_frame_time());
-        player.teleport_cooldown.update(get_frame_time());
+        player.dash_cooldown.update(get_frame_time());
     }
 }
 

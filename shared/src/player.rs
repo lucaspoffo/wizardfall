@@ -13,7 +13,9 @@ pub struct Player {
     pub client_id: u64,
     pub direction: Vec2,
     pub fireball_cooldown: TimerSimple,
-    pub teleport_cooldown: TimerSimple,
+    pub dash_cooldown: TimerSimple,
+    pub dash_duration: f32,
+    pub current_dash_duration: f32,
     pub speed: Vec2,
 }
 
@@ -22,14 +24,16 @@ impl Player {
         let mut fireball_cooldown = TimerSimple::new(0.5);
         fireball_cooldown.finish();
 
-        let mut teleport_cooldown = TimerSimple::new(4.);
-        teleport_cooldown.finish();
+        let mut dash_cooldown = TimerSimple::new(1.);
+        dash_cooldown.finish();
 
         Self {
             client_id,
             direction: Vec2::zero(),
             fireball_cooldown,
-            teleport_cooldown,
+            dash_cooldown,
+            dash_duration: 0.2,
+            current_dash_duration: 0.0,
             speed: Vec2::zero(),
         }
     }
@@ -44,6 +48,7 @@ pub struct PlayerInput {
     pub left: bool,
     pub right: bool,
     pub jump: bool,
+    pub dash: bool,
     pub direction: Vec2,
 }
 
@@ -55,7 +60,6 @@ pub struct CastTarget {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PlayerAction {
     CastFireball(CastTarget),
-    CastTeleport(CastTarget),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]

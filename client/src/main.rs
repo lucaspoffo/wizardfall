@@ -165,12 +165,14 @@ impl App {
             .run_with_data(player_direction, (self.id, mouse_world_position))
             .unwrap();
         let jump = is_key_pressed(KeyCode::Space);
+        let dash = is_key_pressed(KeyCode::LeftShift);
         let input = PlayerInput {
             up,
             down,
             left,
             right,
             jump,
+            dash,
             direction,
         };
 
@@ -182,17 +184,6 @@ impl App {
             let cast_fireball = PlayerAction::CastFireball(cast_target);
 
             let message = bincode::serialize(&cast_fireball).expect("Failed to serialize message.");
-            self.connection.send_message(2, message.into_boxed_slice());
-        }
-
-        if is_key_pressed(KeyCode::Space) {
-            let mut cast_target = CastTarget {
-                position: mouse_world_position,
-            };
-            cast_target.position = cast_target.position + vec2(-16.0, 24.0);
-            let cast_teleport = PlayerAction::CastTeleport(cast_target);
-
-            let message = bincode::serialize(&cast_teleport).expect("Failed to serialize message.");
             self.connection.send_message(2, message.into_boxed_slice());
         }
 
