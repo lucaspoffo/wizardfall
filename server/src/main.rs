@@ -8,7 +8,7 @@ use shared::{
     player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
     timer::Timer,
-    EntityType, EntityUserData, Health, PlayersScore, Transform,
+    EntityType, Health, PlayersScore, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -270,7 +270,7 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
         let mut projectiles = all_storages.borrow::<ViewMut<Projectile>>().unwrap();
         let mut deads = all_storages.borrow::<ViewMut<Dead>>().unwrap();
         let mut health = all_storages.borrow::<ViewMut<Health>>().unwrap();
-        let mut players = all_storages.borrow::<ViewMut<Player>>().unwrap();
+        let players = all_storages.borrow::<View<Player>>().unwrap();
         let player_mapping = all_storages.borrow::<UniqueView<PlayerMapping>>().unwrap();
         let mut physics = all_storages
             .borrow::<UniqueViewMut<Physics<EntityType>>>()
@@ -366,7 +366,7 @@ fn update_players(
 
         player.speed.x = movement_direction.x * 100.;
         if input.jump && on_ground {
-            player.speed.y = -180.;
+            player.speed.y = -270.;
         }
 
         if let Some(hit_collision) = physics.move_h(entity_id, player.speed.x * get_frame_time()) {
@@ -408,8 +408,10 @@ fn create_player(
     mut physics: UniqueViewMut<Physics<EntityType>>,
 ) {
     let entity_id = entities.add_entity((), ());
-    let player_position =
+    let mut player_position =
         player_respawn_points.0[rand::rand() as usize % player_respawn_points.0.len()];
+
+    player_position.y -= 48.;
 
     physics.add_actor(entity_id, EntityType::Player, player_position, 32, 48);
 
@@ -512,7 +514,7 @@ fn sync_physics(
         transform.position = pos;
     }
 
-    for (entity_id, (actor, mut transform)) in (&projectiles, &mut transforms).iter().with_id() {
+    for (entity_id, (_, mut transform)) in (&projectiles, &mut transforms).iter().with_id() {
         let pos = physics.actor_pos(entity_id);
         transform.position = pos;
     }

@@ -64,6 +64,7 @@ impl TextureAtlas {
             dest_size,
             ..Default::default()
         };
+        
         draw_texture_ex(self.texture, draw_pos.x, draw_pos.y, WHITE, params)
     }
 }

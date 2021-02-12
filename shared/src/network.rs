@@ -80,6 +80,7 @@ impl ServerFrame {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NetworkComponent<T: NetworkState> {
+    // TODO: Serialize as bit not u8.
     bitmask: Vec<bool>,
     values: Vec<T::State>,
 }
