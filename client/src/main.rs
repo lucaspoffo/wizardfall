@@ -5,7 +5,7 @@ use shared::{
     ldtk::{draw_level, load_project_and_assets},
     message::ServerMessages,
     network::ServerFrame,
-    player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
+    player::{Player, PlayerAnimation, PlayerInput},
     projectile::Projectile,
     EntityMapping, Health, PlayersScore, Transform,
 };
@@ -166,26 +166,17 @@ impl App {
             .unwrap();
         let jump = is_key_pressed(KeyCode::Space);
         let dash = is_key_pressed(KeyCode::LeftShift);
+        let fire = is_mouse_button_down(MouseButton::Left);
         let input = PlayerInput {
             up,
             down,
             left,
             right,
             jump,
+            fire,
             dash,
             direction,
         };
-
-        if is_mouse_button_pressed(MouseButton::Left) {
-            let cast_target = CastTarget {
-                position: mouse_world_position,
-            };
-
-            let cast_fireball = PlayerAction::CastFireball(cast_target);
-
-            let message = bincode::serialize(&cast_fireball).expect("Failed to serialize message.");
-            self.connection.send_message(2, message.into_boxed_slice());
-        }
 
         let message = bincode::serialize(&input).expect("Failed to serialize message.");
         self.connection.send_message(0, message.into_boxed_slice());
@@ -323,8 +314,13 @@ fn draw_players(
         let wand_y = center_y + player.direction.y * wand_size;
 
         draw_line(center_x, center_y, wand_x, wand_y, 3.0, YELLOW);
-        draw_circle(wand_x, wand_y, 3.0, RED);
-
+        if player.fireball_charge > 0. {
+            draw_circle(wand_x, wand_y, 3.0 + player.fireball_charge * 4., RED);
+        } else if player.fireball_cooldown.is_finished() {
+            draw_circle(wand_x, wand_y, 3.0, PURPLE);
+        } else {
+            draw_circle(wand_x, wand_y, 3.0, BLACK);
+        }
         // Draw Player Health
         let current_life_percent = (player_health.current as f32) / (player_health.max as f32);
         let max_bar_width = 40.;

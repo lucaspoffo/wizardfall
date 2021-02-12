@@ -5,7 +5,7 @@ use shared::{
     ldtk::{load_level_collisions, PlayerRespawnPoints},
     message::ServerMessages,
     network::ServerFrame,
-    player::{CastTarget, Player, PlayerAction, PlayerAnimation, PlayerInput},
+    player::{Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
     timer::Timer,
     EntityType, Health, PlayersScore, Transform,
@@ -118,6 +118,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
         world.run(update_animations).unwrap();
         world.run(update_players).unwrap();
         world.run(update_projectiles).unwrap();
+        world.run(cast_fireball_player).unwrap();
         world.run(sync_physics).unwrap();
 
         world.run(render_physics::<EntityType>).unwrap();
@@ -181,53 +182,9 @@ async fn server(ip: String) -> Result<(), RenetError> {
     }
 }
 
-fn handle_player_action(world: &mut World, player_action: PlayerAction, client_id: &u64) {
+fn handle_player_action(_world: &mut World, player_action: PlayerAction, _client_id: &u64) {
     match player_action {
-        PlayerAction::CastFireball(cast_target) => {
-            world
-                .run_with_data(cast_fireball, (client_id, cast_target))
-                .unwrap();
-        }
-    }
-}
-
-fn cast_fireball(
-    (client_id, cast_target): (&u64, CastTarget),
-    player_mapping: UniqueView<PlayerMapping>,
-    mut players: ViewMut<Player>,
-    mut entities: EntitiesViewMut,
-    mut transforms: ViewMut<Transform>,
-    mut projectiles: ViewMut<Projectile>,
-    mut physics: UniqueViewMut<Physics<EntityType>>,
-) {
-    if let Some(player_entity) = player_mapping.get(client_id) {
-        if !entities.is_alive(*player_entity) {
-            return;
-        }
-
-        // Fireball cooldown
-        let mut player = (&mut players).get(*player_entity).unwrap();
-        if !player.fireball_cooldown.is_finished() {
-            return;
-        } else {
-            player.fireball_cooldown.reset();
-        }
-
-        let entity_id = entities.add_entity((), ());
-        let transform = (&transforms).get(*player_entity).unwrap();
-        physics.add_actor(entity_id, EntityType::Player, transform.position, 16, 16);
-
-        let direction = (cast_target.position - transform.position).normalize();
-        let projectile =
-            Projectile::new(ProjectileType::Fireball, direction * 200., *player_entity);
-        let rotation = direction.angle_between(Vec2::unit_x());
-
-        let transform = Transform::new(transform.position, rotation);
-        entities.add_component(
-            entity_id,
-            (&mut projectiles, &mut transforms),
-            (projectile, transform),
-        );
+        _ => {}
     }
 }
 
@@ -257,6 +214,9 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
             if projectile.duration.as_nanos() == 0 {
                 remove.push(entity_id);
             }
+            
+            // Apply gravity to projectiles
+            projectile.speed.y += 1000. * get_frame_time();
 
             let mut handle_collision = |hit_collision: HitCollision<EntityType>| {
                 match hit_collision.entity_type {
@@ -311,6 +271,55 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
     }
 }
 
+fn cast_fireball_player(
+    mut players: ViewMut<Player>,
+    inputs: View<PlayerInput>,
+    mut entities: EntitiesViewMut,
+    mut transforms: ViewMut<Transform>,
+    mut projectiles: ViewMut<Projectile>,
+    mut physics: UniqueViewMut<Physics<EntityType>>,
+) {
+    let mut created_projectiles = vec![];
+    for (player_id, (mut player, input, transform)) in
+        (&mut players, &inputs, &transforms).iter().with_id()
+    {
+        if input.fire && player.fireball_cooldown.is_finished() {
+            player.fireball_charge += get_frame_time();
+            player.fireball_charge = player
+                .fireball_charge
+                .clamp(0.0, player.fireball_max_charge);
+        } else if !input.fire && player.fireball_charge > 0. {
+            // Fireball cooldown
+            if !player.fireball_cooldown.is_finished() {
+                player.fireball_charge = 0.;
+                return;
+            }
+            let pos = transform.position + vec2(8., 16.);
+
+            let entity_id = entities.add_entity((), ());
+            physics.add_actor(entity_id, EntityType::Fireball, pos, 16, 16);
+
+            let speed = input.direction * (200. * (1. + player.fireball_charge * 3.));
+            let projectile = Projectile::new(ProjectileType::Fireball, speed, player_id);
+            let rotation = input.direction.angle_between(Vec2::unit_x());
+
+            let projectile_transform = Transform::new(pos, rotation);
+            created_projectiles.push((entity_id, (projectile, projectile_transform)));
+
+            player.fireball_cooldown.reset();
+            player.fireball_charge = 0.;
+        }
+    }
+
+    for (entity_id, components) in created_projectiles.iter() {
+        entities.add_component(
+            *entity_id,
+            (&mut projectiles, &mut transforms),
+            components.clone(),
+        );
+    }
+}
+
 fn update_players(
     mut players: ViewMut<Player>,
     inputs: View<PlayerInput>,
@@ -328,7 +337,7 @@ fn update_players(
         } else {
             input.direction
         };
-        
+
         if input.dash && player.dash_cooldown.is_finished() {
             player.dash_cooldown.reset();
             player.current_dash_duration = player.dash_duration;
