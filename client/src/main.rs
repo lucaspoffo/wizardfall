@@ -1,4 +1,3 @@
-// use shared::channels;
 use macroquad::prelude::*;
 use shared::{
     animation::{Animation, AnimationController},
@@ -121,7 +120,7 @@ impl App {
                 1.0 /  320. * 2.,
             ),
             render_target: Some(render_target),
-            target: vec2(320., -160.),
+            target: vec2(320., 160.),
             ..Default::default()
         };
 
@@ -160,16 +159,18 @@ impl App {
         let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
 
         let mut mouse_world_position = self.camera.screen_to_world(mouse_position().into());
-        mouse_world_position.y = 320. + mouse_world_position.y;
+        mouse_world_position.y = 320. - mouse_world_position.y;
         let direction = self
             .world
             .run_with_data(player_direction, (self.id, mouse_world_position))
             .unwrap();
+        let jump = is_key_pressed(KeyCode::Space);
         let input = PlayerInput {
             up,
             down,
             left,
             right,
+            jump,
             direction,
         };
 
@@ -308,7 +309,7 @@ fn draw_players(
         );
 
         let x = transform.position.x;
-        let y = -transform.position.y;
+        let y = transform.position.y;
 
         let mut params = DrawTextureParams::default();
         params.source = Some(draw_rect);
@@ -328,7 +329,7 @@ fn draw_players(
 
         let wand_size = 12.0;
         let wand_x = center_x + player.direction.x * wand_size;
-        let wand_y = center_y - player.direction.y * wand_size;
+        let wand_y = center_y + player.direction.y * wand_size;
 
         draw_line(center_x, center_y, wand_x, wand_y, 3.0, YELLOW);
         draw_circle(wand_x, wand_y, 3.0, RED);
@@ -348,7 +349,7 @@ fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     for (_, transform) in (&projectiles, &transform).iter() {
         draw_rectangle(
             transform.position.x,
-            -transform.position.y + 16.0,
+            transform.position.y,
             16.0,
             16.0,
             RED,

@@ -1,5 +1,5 @@
+use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use glam::Vec2; 
 
 use crate::{
     animation::{Animation, AnimationController},
@@ -14,6 +14,7 @@ pub struct Player {
     pub direction: Vec2,
     pub fireball_cooldown: TimerSimple,
     pub teleport_cooldown: TimerSimple,
+    pub speed: Vec2,
 }
 
 impl Player {
@@ -29,6 +30,7 @@ impl Player {
             direction: Vec2::zero(),
             fireball_cooldown,
             teleport_cooldown,
+            speed: Vec2::zero(),
         }
     }
 }
@@ -41,6 +43,7 @@ pub struct PlayerInput {
     pub down: bool,
     pub left: bool,
     pub right: bool,
+    pub jump: bool,
     pub direction: Vec2,
 }
 

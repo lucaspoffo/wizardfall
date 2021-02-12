@@ -1,12 +1,12 @@
-use ldtk_rust::{LayerInstance, Level, Project, TileInstance};
+use ldtk_rust::{Project, TileInstance};
 use macroquad::prelude::*;
 use shipyard::{UniqueView, World};
 
 use std::collections::HashMap;
 
-use shipyard_rapier2d::rapier::{dynamics::RigidBodyBuilder, geometry::ColliderBuilder};
+use crate::EntityType;
 
-use crate::{EntityType, EntityUserData};
+use platform_physics_shipyard::Physics;
 
 #[derive(Debug)]
 pub struct TextureAtlas {
@@ -24,7 +24,7 @@ impl TextureAtlas {
         }
     }
 
-    pub fn draw_tile(&self, tile: &TileInstance, grid_height: i64) {
+    pub fn draw_tile(&self, tile: &TileInstance) {
         let draw_rect = Rect::new(
             tile.src[0] as f32,
             tile.src[1] as f32,
@@ -46,7 +46,7 @@ impl TextureAtlas {
 
         let mut dest_size = self.tile_size;
         let pos_x = tile.px[0] as f32;
-        let pos_y = (tile.px[1] - grid_height) as f32;
+        let pos_y = tile.px[1] as f32;
         let mut draw_pos = vec2(pos_x, pos_y);
         if flip_x {
             dest_size.x *= -1.0;
@@ -103,15 +103,9 @@ pub async fn load_project_and_assets(world: &World) {
 
 pub struct PlayerRespawnPoints(pub Vec<Vec2>);
 
-// This is an util to fix the y position for the entities loaded from LDtk
-// The rapier physics engine uses an inverted Y axis compared to the level editor.
-fn fix_y_axis(layer: &LayerInstance, value: f32) -> f32 {
-    -value + (layer.grid_size * layer.c_hei) as f32
-}
-
 pub fn load_level_collisions(world: &mut World) {
     let project = load_project();
-    
+
     let entity_layer = project.levels[0]
         .layer_instances
         .as_ref()
@@ -125,13 +119,14 @@ pub fn load_level_collisions(world: &mut World) {
     for entity in entity_layer.entity_instances.iter() {
         println!("Entity identifier: {}", entity.identifier);
         println!("Entity px: {:?}", entity.px);
-        player_respawn_points.0.push(vec2(
-            entity.px[0] as f32,
-            fix_y_axis(entity_layer, entity.px[1] as f32),
-        ));
+        player_respawn_points
+            .0
+            .push(vec2(entity.px[0] as f32, entity.px[1] as f32));
     }
 
     world.add_unique(player_respawn_points).unwrap();
+
+    let mut physics: Physics<EntityType> = Physics::new();
 
     let collision_layer = project.levels[0]
         .layer_instances
@@ -154,26 +149,17 @@ pub fn load_level_collisions(world: &mut World) {
         collisions[tile.coord_id as usize] = true;
     }
 
-    let mut rects = collapse(collisions, grid_width, grid_height);
+    physics.add_static_tiled_layer(
+        collisions,
+        grid_size.x,
+        grid_size.y,
+        grid_width,
+        1,
+        EntityType::Wall,
+        GREEN,
+    );
 
-    for mut rect in rects.iter_mut() {
-        println!("B) Created collision: {:?}", rect);
-        rect.h *= grid_size.x / 2.0;
-        rect.w *= grid_size.y / 2.0;
-        rect.x *= grid_size.x;
-        rect.y *= grid_size.y;
-        rect.x = rect.x + rect.w - grid_size.x;
-        rect.y = rect.y + rect.h - grid_size.y;
-        rect.y = fix_y_axis(collision_layer, rect.y);
-        println!("Created collision: {:?}", rect);
-        let rigid_body = RigidBodyBuilder::new_static().translation(rect.x, rect.y);
-
-        let entity_id = world.add_entity(());
-        let user_data = EntityUserData::new(entity_id, EntityType::Wall);
-        let collider = ColliderBuilder::cuboid(rect.w, rect.h).user_data(user_data.into());
-
-        world.add_component(entity_id, (rigid_body, collider));
-    }
+    world.add_unique(physics).unwrap();
 }
 
 pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<SpriteSheets>) {
@@ -189,34 +175,31 @@ pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<Sprite
         // If there's no tileset, it's value is set to -1, which could be used
         // as a check. Currently it is used only as a key to the hash of asset
         // handles.
-        println!("{:?}", layer.tileset_def_uid);
         let tileset_uid = layer.tileset_def_uid.unwrap_or(-1);
         let sprite_sheet = match sprite_sheets.0.get(&tileset_uid) {
             Some(x) => x,
             None => continue,
         };
 
-        let grid_height = layer.c_hei * layer.grid_size;
         // Finally we match on the four possible kinds of Layer Instances and
-        println!("Layer instance type: {}", layer.layer_instance_type);
         // handle each accordingly.
         match &layer.layer_instance_type[..] {
             "Tiles" => {
                 //println!("Generating Tile Layer: {}", layer.identifier);
                 for tile in layer.grid_tiles.iter().rev() {
-                    sprite_sheet.draw_tile(&tile, grid_height);
+                    sprite_sheet.draw_tile(&tile);
                 }
             }
             "AutoLayer" => {
                 //println!("Generating AutoTile Layer: {}", layer.identifier);
                 for tile in layer.auto_layer_tiles.iter() {
-                    sprite_sheet.draw_tile(&tile, grid_height);
+                    sprite_sheet.draw_tile(&tile);
                 }
             }
             "IntGrid" => {
                 // println!("Generating Entities Layer: {}", layer.identifier);
                 for tile in layer.auto_layer_tiles.iter() {
-                    sprite_sheet.draw_tile(&tile, grid_height);
+                    sprite_sheet.draw_tile(&tile);
                 }
             }
             _ => {
@@ -225,133 +208,3 @@ pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<Sprite
         }
     }
 }
-
-fn collapse(mut collisions: Vec<bool>, width: usize, height: usize) -> Vec<Rect> {
-    assert_eq!(width * height, collisions.len());
-    let mut rects: Vec<Rect> = vec![];
-
-    for j in 0..height {
-        for i in 0..width {
-            let mut x_len = 0;
-            let mut y_len = 1;
-            while collisions[i + x_len + j * width] {
-                if i + x_len < width {
-                    x_len += 1;
-                } else {
-                    break;
-                }
-            }
-
-            // No collision found
-            if x_len == 0 {
-                continue;
-            }
-
-            loop {
-                let mut can_expand = true;
-                // Can't expand down
-                if j + y_len == height {
-                    break;
-                }
-
-                for a in 0..x_len {
-                    can_expand &= collisions[i + a + (j + y_len) * width];
-                }
-
-                if !can_expand {
-                    break;
-                }
-
-                y_len += 1;
-            }
-
-            rects.push(Rect::new(i as f32, j as f32, x_len as f32, y_len as f32));
-
-            // Remove collision
-            for y in j..(j + y_len) {
-                for x in i..(i + x_len) {
-                    collisions[x + y * width] = false;
-                }
-            }
-        }
-    }
-    rects
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_collapse() {
-        let collisions: Vec<bool> = vec![
-            true, true, false, false, true, true, false, false, false, false, true, true, false,
-            false, true, true,
-        ];
-
-        let rects = collapse(collisions, 4, 4);
-        assert_eq!(rects.len(), 2);
-        assert_eq!(rects[0].x, 0.0);
-        assert_eq!(rects[0].y, 0.0);
-        assert_eq!(rects[0].w, 2.0);
-        assert_eq!(rects[0].h, 2.0);
-        assert_eq!(rects[1].x, 2.0);
-        assert_eq!(rects[1].y, 2.0);
-        assert_eq!(rects[1].w, 2.0);
-        assert_eq!(rects[1].h, 2.0);
-    }
-
-    #[test]
-    fn test_collapse_full() {
-        let collisions: Vec<bool> = vec![
-            true, true, true, true, true, true, true, true, true, true, true, true, true, true,
-            true, true,
-        ];
-
-        let rects = collapse(collisions, 4, 4);
-        assert_eq!(rects.len(), 1);
-        assert_eq!(rects[0].x, 0.0);
-        assert_eq!(rects[0].y, 0.0);
-        assert_eq!(rects[0].w, 4.0);
-        assert_eq!(rects[0].h, 4.0);
-    }
-
-    #[test]
-    fn test_collapse_double() {
-        let collisions: Vec<bool> = vec![
-            false, false, true, true, true, true, true, true, true, true, true, true, true, true,
-            false, false,
-        ];
-
-        let rects = collapse(collisions, 4, 4);
-        assert_eq!(rects.len(), 2);
-        assert_eq!(rects[0].x, 2.0);
-        assert_eq!(rects[0].y, 0.0);
-        assert_eq!(rects[0].w, 2.0);
-        assert_eq!(rects[0].h, 3.0);
-        assert_eq!(rects[1].x, 0.0);
-        assert_eq!(rects[1].y, 1.0);
-        assert_eq!(rects[1].w, 2.0);
-        assert_eq!(rects[1].h, 3.0);
-    }
-
-    #[test]
-    fn test_collapse_width_height() {
-        let collisions: Vec<bool> = vec![
-            true, true, true, true, true, false, false, false, false, false, true, true, true,
-            true, true, false, false, false, false, false,
-        ];
-
-        let rects = collapse(collisions, 5, 4);
-        assert_eq!(rects.len(), 2);
-        assert_eq!(rects[0].x, 0.0);
-        assert_eq!(rects[0].y, 0.0);
-        assert_eq!(rects[0].w, 5.0);
-        assert_eq!(rects[0].h, 1.0);
-        assert_eq!(rects[1].x, 0.0);
-        assert_eq!(rects[1].y, 2.0);
-        assert_eq!(rects[1].w, 5.0);
-        assert_eq!(rects[1].h, 1.0);
-    }
-}
-

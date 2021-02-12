@@ -13,25 +13,12 @@ use shared::{
 
 use alto_logger::TermLogger;
 use bincode::{deserialize, serialize};
+use platform_physics_shipyard::{render::render_physics, HitCollision, Physics};
 use renet::{
     endpoint::EndpointConfig,
     error::RenetError,
     protocol::unsecure::UnsecureServerProtocol,
     server::{Server, ServerConfig, ServerEvent},
-};
-use shipyard_rapier2d::{
-    na::{Vector2, Point2},
-    physics::{
-        create_body_and_collider_system, create_joints_system, destroy_body_and_collider_system,
-        setup_physics, step_world_system, EventQueue, RapierConfiguration,
-        RigidBodyHandleComponent,
-    },
-    rapier::{
-        dynamics::{RigidBodyBuilder, RigidBodySet},
-        geometry::{ColliderBuilder, ColliderSet, Ray, InteractionGroups},
-        pipeline::QueryPipeline
-    },
-    render::render_colliders,
 };
 
 use glam::{vec2, Vec2};
@@ -64,13 +51,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
         Server::new(socket, server_config, endpoint_config, channels())?;
 
     let mut world = World::new();
-    world.run(setup_physics).unwrap();
 
-    world
-        .run(|mut rapier_config: UniqueViewMut<RapierConfiguration>| {
-            rapier_config.gravity = Vector2::new(0., 0.);
-        })
-        .unwrap();
     load_level_collisions(&mut world);
 
     world.add_unique(PlayerMapping::new()).unwrap();
@@ -78,6 +59,10 @@ async fn server(ip: String) -> Result<(), RenetError> {
     world.add_unique(PlayersScore::default()).unwrap();
 
     world.borrow::<ViewMut<Player>>().unwrap().track_deletion();
+    world
+        .borrow::<ViewMut<Projectile>>()
+        .unwrap()
+        .track_deletion();
 
     let viewport_height = 600.0;
     let aspect = screen_width() / screen_height();
@@ -89,7 +74,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
             -1.0 / viewport_height as f32 * 2.,
         ),
         // TODO: remove tile size magic numbers
-        target: vec2(viewport_width / 2. - 100., -viewport_height / 2.),
+        target: vec2(viewport_width / 2., viewport_height / 2.),
         ..Default::default()
     };
 
@@ -133,27 +118,15 @@ async fn server(ip: String) -> Result<(), RenetError> {
         world.run(update_animations).unwrap();
         world.run(update_players).unwrap();
         world.run(update_projectiles).unwrap();
+        world.run(sync_physics).unwrap();
 
-        // Systems to update physics world
-        world.run(create_body_and_collider_system).unwrap();
-        world.run(create_joints_system).unwrap();
-        world.run_with_data(step_world_system, 0.0016666).unwrap();
+        world.run(render_physics::<EntityType>).unwrap();
 
-        world.run(sync_transform_rapier).unwrap();
-
-        world.run(render_colliders).unwrap();
-        world.run(display_events).unwrap();
         world.run(remove_zero_health).unwrap();
-        // world.run(debug::<Player>).unwrap();
-        // world.run(debug::<PlayerInput>).unwrap();
-        // world.run(debug::<Transform>).unwrap();
-        // world.run(debug::<Velocity>).unwrap();
         world.run(remove_dead).unwrap();
 
-        // Remove
-        world.run(destroy_body_and_collider_system).unwrap();
-
         world.run(add_player_respawn).unwrap();
+        world.run(destroy_physics_entities).unwrap();
 
         let server_frame = ServerFrame::from_world(&world);
         // println!("{:?}", server_frame);
@@ -230,8 +203,7 @@ fn cast_fireball(
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
     mut projectiles: ViewMut<Projectile>,
-    mut colliders_builder: ViewMut<ColliderBuilder>,
-    mut bodies_builder: ViewMut<RigidBodyBuilder>,
+    mut physics: UniqueViewMut<Physics<EntityType>>,
 ) {
     if let Some(player_entity) = player_mapping.get(client_id) {
         if !entities.is_alive(*player_entity) {
@@ -246,33 +218,20 @@ fn cast_fireball(
             player.fireball_cooldown.reset();
         }
 
-        let transform = (&transforms).get(*player_entity).unwrap();
-
-        let projectile = Projectile::new(ProjectileType::Fireball, *player_entity);
-        let direction = (cast_target.position - transform.position).normalize();
-        let rotation = direction.angle_between(Vec2::unit_x());
-
         let entity_id = entities.add_entity((), ());
-        let user_data = EntityUserData::new(entity_id, EntityType::Fireball);
-        // TODO: remove magic number fireball speed.
-        let rigid_body = RigidBodyBuilder::new_dynamic()
-            .translation(transform.position.x, transform.position.y)
-            .linvel(direction.x * 200., direction.y * 200.)
-            .rotation(rotation);
-        let collider_builder = ColliderBuilder::ball(8.)
-            .sensor(true)
-            .user_data(user_data.into());
+        let transform = (&transforms).get(*player_entity).unwrap();
+        physics.add_actor(entity_id, EntityType::Player, transform.position, 16, 16);
+
+        let direction = (cast_target.position - transform.position).normalize();
+        let projectile =
+            Projectile::new(ProjectileType::Fireball, direction * 200., *player_entity);
+        let rotation = direction.angle_between(Vec2::unit_x());
 
         let transform = Transform::new(transform.position, rotation);
         entities.add_component(
             entity_id,
-            (
-                &mut projectiles,
-                &mut transforms,
-                &mut bodies_builder,
-                &mut colliders_builder,
-            ),
-            (projectile, transform, rigid_body, collider_builder),
+            (&mut projectiles, &mut transforms),
+            (projectile, transform),
         );
     }
 }
@@ -282,8 +241,6 @@ fn cast_teleport(
     entities: EntitiesView,
     mut players: ViewMut<Player>,
     player_mapping: UniqueView<PlayerMapping>,
-    body_handles: View<RigidBodyHandleComponent>,
-    mut rigid_bodies: UniqueViewMut<RigidBodySet>,
 ) {
     if let Some(player_entity) = player_mapping.get(client_id) {
         if !entities.is_alive(*player_entity) {
@@ -298,15 +255,6 @@ fn cast_teleport(
         } else {
             player.teleport_cooldown.reset();
         }
-
-        if let Ok(rigid_body) = body_handles.get(*player_entity) {
-            if let Some(rb) = rigid_bodies.get_mut(rigid_body.handle()) {
-                let mut pos = *rb.position();
-                pos.translation.x = cast_target.position.x;
-                pos.translation.y = cast_target.position.y;
-                rb.set_position(pos, true);
-            }
-        }
     }
 }
 
@@ -320,6 +268,13 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
     let mut remove = vec![];
     {
         let mut projectiles = all_storages.borrow::<ViewMut<Projectile>>().unwrap();
+        let mut deads = all_storages.borrow::<ViewMut<Dead>>().unwrap();
+        let mut health = all_storages.borrow::<ViewMut<Health>>().unwrap();
+        let mut players = all_storages.borrow::<ViewMut<Player>>().unwrap();
+        let player_mapping = all_storages.borrow::<UniqueView<PlayerMapping>>().unwrap();
+        let mut physics = all_storages
+            .borrow::<UniqueViewMut<Physics<EntityType>>>()
+            .unwrap();
 
         for (entity_id, mut projectile) in (&mut projectiles).iter().with_id() {
             projectile.duration = projectile
@@ -328,6 +283,54 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
                 .unwrap_or_else(|| Duration::from_micros(0));
             if projectile.duration.as_nanos() == 0 {
                 remove.push(entity_id);
+            }
+
+            let mut handle_collision = |hit_collision: HitCollision<EntityType>| {
+                match hit_collision.entity_type {
+                    EntityType::Player => {
+                        if let Some(owner_id) = hit_collision.entity_id {
+                            // Fireball colliding with owner
+                            if owner_id == projectile.owner {
+                                return;
+                            }
+                        }
+                        // With we are hitting a player we always have an entity_id
+                        let player = hit_collision.entity_id.unwrap();
+                        let mut health = (&mut health).get(player).unwrap();
+                        let client_id = player_mapping
+                            .iter()
+                            .find(|(_, v)| **v == player)
+                            .map(|(k, _)| *k);
+                        health.take_damage(10, client_id);
+                        deads.add_component_unchecked(entity_id, Dead);
+                    }
+                    _ => {
+                        deads.add_component_unchecked(entity_id, Dead);
+                    }
+                }
+            };
+
+            if let Some(hit_collision) =
+                physics.move_h(entity_id, projectile.speed.x * get_frame_time())
+            {
+                handle_collision(hit_collision);
+            }
+            if let Some(hit_collision) =
+                physics.move_v(entity_id, projectile.speed.y * get_frame_time())
+            {
+                handle_collision(hit_collision);
+            }
+
+            for (player_id, player) in players.iter().with_id() {
+                if player_id != projectile.owner {
+                    if physics.overlaps_actor(entity_id, player_id) {
+                         // With we are hitting a player we always have an entity_id
+                        let mut health = (&mut health).get(player_id).unwrap();
+                        health.take_damage(10, Some(player.client_id));
+                        deads.add_component_unchecked(entity_id, Dead);
+
+                    }
+                }
             }
         }
     }
@@ -340,29 +343,45 @@ fn update_players(
     mut players: ViewMut<Player>,
     inputs: View<PlayerInput>,
     mut animations: ViewMut<AnimationController>,
-    body_handles: View<RigidBodyHandleComponent>,
-    mut rigid_bodies: UniqueViewMut<RigidBodySet>,
+    mut physics: UniqueViewMut<Physics<EntityType>>,
 ) {
-    for (mut player, input, body_handle, mut animation) in
-        (&mut players, &inputs, &body_handles, &mut animations).iter()
+    for (entity_id, (mut player, input, mut animation)) in
+        (&mut players, &inputs, &mut animations).iter().with_id()
     {
         let x = (input.right as i8 - input.left as i8) as f32;
         let y = (input.up as i8 - input.down as i8) as f32;
-        let mut movement_direction = Vector2::new(x, y);
+        let movement_direction = vec2(x, y);
+        player.direction = input.direction;
 
-        // Update the velocity on the rigid_body_component,
-        if let Some(rb) = rigid_bodies.get_mut(body_handle.handle()) {
-            if movement_direction.magnitude() != 0.0 {
-                movement_direction = movement_direction.normalize();
-                rb.set_linvel(movement_direction * 170.0, true);
-            } else {
-                rb.set_linvel(Vector2::zeros(), true);
+        let pos = physics.actor_pos(entity_id);
+        let on_ground = physics
+            .collide_check(entity_id, pos + vec2(0., 1.))
+            .is_some();
+
+        if !on_ground {
+            player.speed.y += 500. * get_frame_time();
+        } else {
+            player.speed.y = 500. * get_frame_time();
+        }
+
+        player.speed.x = movement_direction.x * 100.;
+        if input.jump && on_ground {
+            player.speed.y = -180.;
+        }
+
+        if let Some(hit_collision) = physics.move_h(entity_id, player.speed.x * get_frame_time()) {
+            match hit_collision.entity_type {
+                _ => {}
+            }
+        }
+        if let Some(hit_collision) = physics.move_v(entity_id, player.speed.y * get_frame_time()) {
+            match hit_collision.entity_type {
+                _ => {}
             }
         }
 
-        player.direction = input.direction;
-
-        if input.right ^ input.left || input.down ^ input.up {
+        // Update animation
+        if input.right ^ input.left || input.down ^ input.up || !on_ground {
             animation.change_animation(PlayerAnimation::Run.into());
         } else {
             animation.change_animation(PlayerAnimation::Idle.into());
@@ -384,46 +403,26 @@ fn create_player(
     mut transforms: ViewMut<Transform>,
     mut players: ViewMut<Player>,
     mut health: ViewMut<Health>,
-    mut colliders_builder: ViewMut<ColliderBuilder>,
-    mut bodies_builder: ViewMut<RigidBodyBuilder>,
     mut animations: ViewMut<AnimationController>,
     mut player_mapping: UniqueViewMut<PlayerMapping>,
+    mut physics: UniqueViewMut<Physics<EntityType>>,
 ) {
+    let entity_id = entities.add_entity((), ());
+    let player_position =
+        player_respawn_points.0[rand::rand() as usize % player_respawn_points.0.len()];
+
+    physics.add_actor(entity_id, EntityType::Player, player_position, 32, 48);
+
     let player = Player::new(client_id);
     let transform = Transform::default();
     let animation = PlayerAnimation::Idle.get_animation_controller();
 
-    let player_position =
-        player_respawn_points.0[rand::rand() as usize % player_respawn_points.0.len()];
-
-    let rigid_body = RigidBodyBuilder::new_dynamic()
-        .lock_rotations()
-        .translation(player_position.x, player_position.y);
-
-    let entity_id = entities.add_entity((), ());
-    let user_data = EntityUserData::new(entity_id, EntityType::Player);
     let player_health = Health::new(50);
-
-    let collider_builder = ColliderBuilder::cuboid(16., 24.).user_data(user_data.into());
 
     entities.add_component(
         entity_id,
-        (
-            &mut players,
-            &mut transforms,
-            &mut animations,
-            &mut bodies_builder,
-            &mut colliders_builder,
-            &mut health,
-        ),
-        (
-            player,
-            transform,
-            animation,
-            rigid_body,
-            collider_builder,
-            player_health,
-        ),
+        (&mut players, &mut transforms, &mut animations, &mut health),
+        (player, transform, animation, player_health),
     );
 
     player_mapping.insert(client_id, entity_id);
@@ -449,103 +448,6 @@ fn debug<T: std::fmt::Debug + 'static>(view: View<T>) {
 }
 
 struct Dead;
-
-fn display_events(
-    events: UniqueViewMut<EventQueue>,
-    colliders: UniqueView<ColliderSet>,
-    projectiles: View<Projectile>,
-    player_mapping: UniqueView<PlayerMapping>,
-    mut health: ViewMut<Health>,
-    mut deads: ViewMut<Dead>,
-) {
-    while let Ok(intersection_event) = events.intersection_events.pop() {
-        let collider1 = colliders.get(intersection_event.collider1).unwrap();
-        let collider2 = colliders.get(intersection_event.collider2).unwrap();
-        let entity_data1 = EntityUserData::from_user_data(collider1.user_data);
-        let entity_data2 = EntityUserData::from_user_data(collider2.user_data);
-        match (&entity_data1, &entity_data2) {
-            (
-                EntityUserData {
-                    entity_type: EntityType::Wall,
-                    ..
-                },
-                EntityUserData {
-                    entity_type: EntityType::Fireball,
-                    entity_id: fireball,
-                },
-            )
-            | (
-                EntityUserData {
-                    entity_type: EntityType::Fireball,
-                    entity_id: fireball,
-                },
-                EntityUserData {
-                    entity_type: EntityType::Wall,
-                    ..
-                },
-            ) => {
-                deads.add_component_unchecked(*fireball, Dead);
-            }
-            (
-                EntityUserData {
-                    entity_type: EntityType::Player,
-                    entity_id: player,
-                },
-                EntityUserData {
-                    entity_type: EntityType::Fireball,
-                    entity_id: fireball,
-                },
-            )
-            | (
-                EntityUserData {
-                    entity_type: EntityType::Fireball,
-                    entity_id: fireball,
-                },
-                EntityUserData {
-                    entity_type: EntityType::Player,
-                    entity_id: player,
-                },
-            ) => {
-                let projectile = projectiles.get(*fireball).unwrap();
-                if projectile.owner == *player {
-                    // Fireball colliding with owner
-                    continue;
-                }
-                let mut health = (&mut health).get(*player).unwrap();
-                let client_id = player_mapping
-                    .iter()
-                    .find(|(_, v)| *v == player)
-                    .map(|(k, _)| *k);
-                health.take_damage(10, client_id);
-                deads.add_component_unchecked(*fireball, Dead);
-            }
-            _ => {
-                println!(
-                    "Unhandled collision event\nEntity Type 1: {:?}\nEntityType 2:{:?}",
-                    entity_data1.entity_type, entity_data2.entity_type
-                );
-            }
-        }
-    }
-
-    while let Ok(contact_event) = events.contact_events.pop() {
-        println!("Received contact event: {:?}", contact_event);
-    }
-}
-
-fn sync_transform_rapier(
-    mut transforms: ViewMut<Transform>,
-    rigid_bodies: View<RigidBodyHandleComponent>,
-    bodies_set: UniqueView<RigidBodySet>,
-) {
-    for (mut transform, rigid_body) in (&mut transforms, &rigid_bodies).iter() {
-        if let Some(rb) = bodies_set.get(rigid_body.handle()) {
-            let pos = *rb.position();
-            // TODO: Check if is need to check interpolate with previous pos
-            transform.position = Vec2::new(pos.translation.vector.x, pos.translation.vector.y);
-        }
-    }
-}
 
 fn remove_dead(mut all_storages: AllStoragesViewMut) {
     all_storages.delete_any::<SparseSet<Dead>>();
@@ -575,8 +477,10 @@ fn add_player_respawn(
     player_mapping: UniqueView<PlayerMapping>,
     mut players: ViewMut<Player>,
     mut player_respawn: UniqueViewMut<PlayerRespawn>,
+    mut physics: UniqueViewMut<Physics<EntityType>>,
 ) {
-    for (_, player) in players.take_deleted().iter() {
+    for (entity_id, player) in players.take_deleted().iter() {
+        physics.remove_actor(entity_id);
         if player_mapping.get(&player.client_id).is_some() {
             let respawn_timer = Timer::new(Duration::from_secs(5));
             player_respawn.0.insert(player.client_id, respawn_timer);
@@ -595,4 +499,30 @@ fn player_respawn(mut player_respawn: UniqueViewMut<PlayerRespawn>) -> Vec<u64> 
     player_respawn.0.retain(|_, timer| !timer.is_finished());
 
     respawn_players
+}
+
+fn sync_physics(
+    players: View<Player>,
+    projectiles: View<Projectile>,
+    mut transforms: ViewMut<Transform>,
+    physics: UniqueView<Physics<EntityType>>,
+) {
+    for (entity_id, (_, mut transform)) in (&players, &mut transforms).iter().with_id() {
+        let pos = physics.actor_pos(entity_id);
+        transform.position = pos;
+    }
+
+    for (entity_id, (actor, mut transform)) in (&projectiles, &mut transforms).iter().with_id() {
+        let pos = physics.actor_pos(entity_id);
+        transform.position = pos;
+    }
+}
+
+fn destroy_physics_entities(
+    mut physics: UniqueViewMut<Physics<EntityType>>,
+    mut projectiles: ViewMut<Projectile>,
+) {
+    for (entity_id, _) in projectiles.take_deleted().iter() {
+        physics.remove_actor(entity_id);
+    }
 }

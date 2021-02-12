@@ -62,7 +62,7 @@ impl Transform {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum EntityType {
     Unknown,
     Player,
