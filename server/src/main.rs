@@ -345,6 +345,7 @@ fn update_players(
         }
         if physics.move_v(entity_id, player.speed.y * get_frame_time()) {
             player.current_dash_duration = 0.;
+            player.speed.y = 0.0;
         }
 
         // Update animation
