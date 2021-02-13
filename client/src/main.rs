@@ -18,15 +18,15 @@ use renet::{
 };
 use shipyard::*;
 
+use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::collections::HashMap;
 
-mod player;
 mod animation;
+mod player;
 
-use crate::player::{load_player_texture, draw_players, track_client_entity, player_input};
+use crate::player::{draw_players, load_player_texture, player_input, track_client_entity};
 
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {
@@ -90,7 +90,6 @@ struct App {
     connection: ClientConnected,
 }
 
-
 pub struct ClientInfo {
     pub client_id: u64,
     pub entity_id: Option<EntityId>,
@@ -102,10 +101,7 @@ impl App {
         set_texture_filter(render_target.texture, FilterMode::Nearest);
 
         let camera = Camera2D {
-            zoom: vec2(
-                1.0 / 640. * 2.,
-                1.0 /  320. * 2.,
-            ),
+            zoom: vec2(1.0 / 640. * 2., 1.0 / 320. * 2.),
             render_target: Some(render_target),
             target: vec2(320., 160.),
             ..Default::default()
@@ -113,7 +109,10 @@ impl App {
 
         let world = World::new();
 
-        let client_info = ClientInfo { client_id: id, entity_id: None };
+        let client_info = ClientInfo {
+            client_id: id,
+            entity_id: None,
+        };
         world.add_unique(client_info).unwrap();
 
         // Tracking of components
@@ -131,10 +130,13 @@ impl App {
     async fn update(&mut self) {
         set_camera(self.camera);
         clear_background(BLACK);
-        
+
         self.world.run(track_client_entity).unwrap();
 
-        let input = self.world.run_with_data(player_input, &self.camera).unwrap();
+        let input = self
+            .world
+            .run_with_data(player_input, &self.camera)
+            .unwrap();
         let message = bincode::serialize(&input).expect("Failed to serialize message.");
         self.connection.send_message(0, message.into_boxed_slice());
         self.connection.send_packets().unwrap();
@@ -161,11 +163,11 @@ impl App {
                 }
             }
         }
-    
+
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
-        
+
         set_default_camera();
         clear_background(RED);
 
@@ -211,13 +213,7 @@ fn draw_score(players_score: UniqueView<PlayersScore>) {
 
 fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     for (_, transform) in (&projectiles, &transform).iter() {
-        draw_rectangle(
-            transform.position.x,
-            transform.position.y,
-            16.0,
-            16.0,
-            RED,
-        );
+        draw_rectangle(transform.position.x, transform.position.y, 16.0, 16.0, RED);
     }
 }
 

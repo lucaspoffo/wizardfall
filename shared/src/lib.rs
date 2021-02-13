@@ -17,6 +17,7 @@ pub mod network;
 pub mod player;
 pub mod projectile;
 pub mod timer;
+pub mod physics;
 
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;
@@ -59,27 +60,6 @@ impl Default for Transform {
 impl Transform {
     pub fn new(position: Vec2, rotation: f32) -> Self {
         Self { position, rotation }
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum EntityType {
-    Unknown,
-    Player,
-    Fireball,
-    Wall,
-}
-
-impl From<u8> for EntityType {
-    fn from(value: u8) -> Self {
-        use crate::EntityType::*;
-
-        match value {
-            1 => Player,
-            2 => Fireball,
-            3 => Wall,
-            _ => Unknown,
-        }
     }
 }
 

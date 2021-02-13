@@ -4,9 +4,7 @@ use shipyard::{UniqueView, World};
 
 use std::collections::HashMap;
 
-use crate::EntityType;
-
-use platform_physics_shipyard::Physics;
+use crate::physics::Physics;
 
 #[derive(Debug)]
 pub struct TextureAtlas {
@@ -127,7 +125,7 @@ pub fn load_level_collisions(world: &mut World) {
 
     world.add_unique(player_respawn_points).unwrap();
 
-    let mut physics: Physics<EntityType> = Physics::new();
+    let mut physics: Physics = Physics::new();
 
     let collision_layer = project.levels[0]
         .layer_instances
@@ -156,7 +154,6 @@ pub fn load_level_collisions(world: &mut World) {
         grid_size.y,
         grid_width,
         1,
-        EntityType::Wall,
         GREEN,
     );
 

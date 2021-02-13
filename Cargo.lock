@@ -436,14 +436,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "platform-physics-shipyard"
-version = "0.1.0"
-dependencies = [
- "macroquad",
- "shipyard",
-]
-
-[[package]]
 name = "png"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -645,7 +637,6 @@ dependencies = [
  "glam",
  "log",
  "macroquad",
- "platform-physics-shipyard",
  "renet",
  "shared",
  "shipyard",
@@ -659,7 +650,6 @@ dependencies = [
  "glam",
  "ldtk_rust",
  "macroquad",
- "platform-physics-shipyard",
  "renet",
  "serde",
  "shipyard",

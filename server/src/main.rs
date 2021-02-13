@@ -5,15 +5,15 @@ use shared::{
     ldtk::{load_level_collisions, PlayerRespawnPoints},
     message::ServerMessages,
     network::ServerFrame,
+    physics::{render_physics, Physics},
     player::{Player, PlayerAction, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
     timer::Timer,
-    EntityType, Health, PlayersScore, Transform,
+    Health, PlayersScore, Transform,
 };
 
 use alto_logger::TermLogger;
 use bincode::{deserialize, serialize};
-use platform_physics_shipyard::{render::render_physics, HitCollision, Physics};
 use renet::{
     endpoint::EndpointConfig,
     error::RenetError,
@@ -121,7 +121,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
         world.run(cast_fireball_player).unwrap();
         world.run(sync_physics).unwrap();
 
-        world.run(render_physics::<EntityType>).unwrap();
+        world.run(render_physics).unwrap();
 
         world.run(remove_zero_health).unwrap();
         world.run(remove_dead).unwrap();
@@ -201,10 +201,7 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
         let mut deads = all_storages.borrow::<ViewMut<Dead>>().unwrap();
         let mut health = all_storages.borrow::<ViewMut<Health>>().unwrap();
         let players = all_storages.borrow::<View<Player>>().unwrap();
-        let player_mapping = all_storages.borrow::<UniqueView<PlayerMapping>>().unwrap();
-        let mut physics = all_storages
-            .borrow::<UniqueViewMut<Physics<EntityType>>>()
-            .unwrap();
+        let mut physics = all_storages.borrow::<UniqueViewMut<Physics>>().unwrap();
 
         for (entity_id, mut projectile) in (&mut projectiles).iter().with_id() {
             projectile.duration = projectile
@@ -214,54 +211,25 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
             if projectile.duration.as_nanos() == 0 {
                 remove.push(entity_id);
             }
-            
+
             // Apply gravity to projectiles
             projectile.speed.y += 1000. * get_frame_time();
 
-            let mut handle_collision = |hit_collision: HitCollision<EntityType>| {
-                match hit_collision.entity_type {
-                    EntityType::Player => {
-                        if let Some(owner_id) = hit_collision.entity_id {
-                            // Fireball colliding with owner
-                            if owner_id == projectile.owner {
-                                return;
-                            }
-                        }
-                        // With we are hitting a player we always have an entity_id
-                        let player = hit_collision.entity_id.unwrap();
-                        let mut health = (&mut health).get(player).unwrap();
-                        let client_id = player_mapping
-                            .iter()
-                            .find(|(_, v)| **v == player)
-                            .map(|(k, _)| *k);
-                        health.take_damage(10, client_id);
-                        deads.add_component_unchecked(entity_id, Dead);
-                    }
-                    _ => {
-                        deads.add_component_unchecked(entity_id, Dead);
-                    }
+            if physics.move_h(entity_id, projectile.speed.x * get_frame_time())
+                || physics.move_v(entity_id, projectile.speed.y * get_frame_time())
+            {
+                deads.add_component_unchecked(entity_id, Dead);
+                return;
+            }
+
+            for (player_id, (player, mut health)) in (&players, &mut health).iter().with_id() {
+                if player_id == projectile.owner {
+                    continue;
                 }
-            };
 
-            if let Some(hit_collision) =
-                physics.move_h(entity_id, projectile.speed.x * get_frame_time())
-            {
-                handle_collision(hit_collision);
-            }
-            if let Some(hit_collision) =
-                physics.move_v(entity_id, projectile.speed.y * get_frame_time())
-            {
-                handle_collision(hit_collision);
-            }
-
-            for (player_id, player) in players.iter().with_id() {
-                if player_id != projectile.owner {
-                    if physics.overlaps_actor(entity_id, player_id) {
-                        // With we are hitting a player we always have an entity_id
-                        let mut health = (&mut health).get(player_id).unwrap();
-                        health.take_damage(10, Some(player.client_id));
-                        deads.add_component_unchecked(entity_id, Dead);
-                    }
+                if physics.overlaps_actor(entity_id, player_id) {
+                    health.take_damage(10, Some(player.client_id));
+                    deads.add_component_unchecked(entity_id, Dead);
                 }
             }
         }
@@ -277,7 +245,7 @@ fn cast_fireball_player(
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
     mut projectiles: ViewMut<Projectile>,
-    mut physics: UniqueViewMut<Physics<EntityType>>,
+    mut physics: UniqueViewMut<Physics>,
 ) {
     let mut created_projectiles = vec![];
     for (player_id, (mut player, input, transform)) in
@@ -297,7 +265,7 @@ fn cast_fireball_player(
             let pos = transform.position + vec2(8., 16.);
 
             let entity_id = entities.add_entity((), ());
-            physics.add_actor(entity_id, EntityType::Fireball, pos, 16, 16);
+            physics.add_actor(entity_id, pos, 16, 16);
 
             let speed = input.direction * (200. * (1. + player.fireball_charge * 3.));
             let projectile = Projectile::new(ProjectileType::Fireball, speed, player_id);
@@ -324,7 +292,7 @@ fn update_players(
     mut players: ViewMut<Player>,
     inputs: View<PlayerInput>,
     mut animations: ViewMut<AnimationController>,
-    mut physics: UniqueViewMut<Physics<EntityType>>,
+    mut physics: UniqueViewMut<Physics>,
 ) {
     for (entity_id, (mut player, input, mut animation)) in
         (&mut players, &inputs, &mut animations).iter().with_id()
@@ -352,9 +320,7 @@ fn update_players(
         }
 
         let pos = physics.actor_pos(entity_id);
-        let on_ground = physics
-            .collide_check(entity_id, pos + vec2(0., 1.))
-            .is_some();
+        let on_ground = physics.collide_check(entity_id, pos + vec2(0., 1.));
 
         if player.current_dash_duration > 0.0 {
             player.current_dash_duration -= get_frame_time();
@@ -374,17 +340,11 @@ fn update_players(
             }
         }
 
-        if let Some(hit_collision) = physics.move_h(entity_id, player.speed.x * get_frame_time()) {
+        if physics.move_h(entity_id, player.speed.x * get_frame_time()) {
             player.current_dash_duration = 0.;
-            match hit_collision.entity_type {
-                _ => {}
-            }
         }
-        if let Some(hit_collision) = physics.move_v(entity_id, player.speed.y * get_frame_time()) {
+        if physics.move_v(entity_id, player.speed.y * get_frame_time()) {
             player.current_dash_duration = 0.;
-            match hit_collision.entity_type {
-                _ => {}
-            }
         }
 
         // Update animation
@@ -412,7 +372,7 @@ fn create_player(
     mut health: ViewMut<Health>,
     mut animations: ViewMut<AnimationController>,
     mut player_mapping: UniqueViewMut<PlayerMapping>,
-    mut physics: UniqueViewMut<Physics<EntityType>>,
+    mut physics: UniqueViewMut<Physics>,
 ) {
     let entity_id = entities.add_entity((), ());
     let mut player_position =
@@ -420,7 +380,7 @@ fn create_player(
 
     player_position.y -= 48.;
 
-    physics.add_actor(entity_id, EntityType::Player, player_position, 32, 48);
+    physics.add_actor(entity_id, player_position, 32, 48);
 
     let player = Player::new(client_id);
     let transform = Transform::default();
@@ -486,7 +446,7 @@ fn add_player_respawn(
     player_mapping: UniqueView<PlayerMapping>,
     mut players: ViewMut<Player>,
     mut player_respawn: UniqueViewMut<PlayerRespawn>,
-    mut physics: UniqueViewMut<Physics<EntityType>>,
+    mut physics: UniqueViewMut<Physics>,
 ) {
     for (entity_id, player) in players.take_deleted().iter() {
         physics.remove_actor(entity_id);
@@ -514,7 +474,7 @@ fn sync_physics(
     players: View<Player>,
     projectiles: View<Projectile>,
     mut transforms: ViewMut<Transform>,
-    physics: UniqueView<Physics<EntityType>>,
+    physics: UniqueView<Physics>,
 ) {
     for (entity_id, (_, mut transform)) in (&players, &mut transforms).iter().with_id() {
         let pos = physics.actor_pos(entity_id);
@@ -528,7 +488,7 @@ fn sync_physics(
 }
 
 fn destroy_physics_entities(
-    mut physics: UniqueViewMut<Physics<EntityType>>,
+    mut physics: UniqueViewMut<Physics>,
     mut projectiles: ViewMut<Projectile>,
 ) {
     for (entity_id, _) in projectiles.take_deleted().iter() {

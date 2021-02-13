@@ -23,13 +23,7 @@ impl TextureAnimation {
         }
     }
 
-    pub fn draw(
-        &self,
-        x: f32,
-        y: f32,
-        flip_x: bool,
-        animation_controller: &AnimationController,
-    ) {
+    pub fn draw(&self, x: f32, y: f32, flip_x: bool, animation_controller: &AnimationController) {
         if animation_controller.frame > self.h_frames * self.v_frames {
             println!(
                 "Invalid animation frame {} for texture player",

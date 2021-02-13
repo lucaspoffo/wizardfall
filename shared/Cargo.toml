@@ -14,4 +14,3 @@ serde = "1"
 glam = { version = "0.10", features = [ "serde" ] }
 shipyard = { git = "https://github.com/leudz/shipyard.git", version = "0.4.1", features = [ "serde1" ] }
 ldtk_rust = "0.3.0"
-platform-physics-shipyard = { path = "../../platform-physics-shipyard" }
