@@ -112,7 +112,7 @@ pub fn load_level_collisions(world: &mut World) {
         .as_ref()
         .unwrap()
         .iter()
-        .find(|l| l.identifier == "Entities".to_string())
+        .find(|l| l.identifier == *"Entities")
         .unwrap();
 
     let mut player_respawn_points = PlayerRespawnPoints(vec![]);
@@ -134,7 +134,7 @@ pub fn load_level_collisions(world: &mut World) {
         .as_ref()
         .unwrap()
         .iter()
-        .find(|l| l.identifier == "Collisions".to_string())
+        .find(|l| l.identifier == *"Collisions")
         .unwrap();
 
     let grid_size = vec2(

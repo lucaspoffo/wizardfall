@@ -4,7 +4,6 @@
 - ~~Load respawn point from editor~~
 - ~~Add score board stats and interface~~
 - ~~Add player cooldown for spells~~
-- Add player interface for spells cooldown and health
 - Add Connect Screen for player.
 - Add win condition and restart game
 - Make load multiple levels

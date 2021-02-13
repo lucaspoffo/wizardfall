@@ -57,6 +57,21 @@ pub struct PlayerInput {
     pub direction: Vec2,
 }
 
+impl Default for PlayerInput {
+    fn default() -> Self {
+        Self {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            dash: false,
+            fire: false,
+            jump: false,
+            direction: Vec2::zero(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CastTarget {
     pub position: Vec2,
