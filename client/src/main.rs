@@ -16,7 +16,7 @@ use renet::{
     protocol::unsecure::UnsecureClientProtocol,
 };
 use shipyard::*;
-use ui::{draw_connect_menu, UiState};
+use ui::{draw_connect_menu, draw_connection_screen, UiState};
 
 use std::collections::HashMap;
 use std::net::UdpSocket;
@@ -144,20 +144,23 @@ impl App {
                     self.request_connection = Some(request_connection);
                 }
             }
-            Screen::Connecting => match self.request_connection.as_mut().unwrap().update() {
-                Ok(Some(connection)) => {
-                    self.connection = Some(connection);
-                    self.request_connection = None;
-                    self.screen = Screen::Gameplay;
-                    self.ui.connect_error = None;
+            Screen::Connecting => {
+                draw_connection_screen(&mut self.ui);
+                match self.request_connection.as_mut().unwrap().update() {
+                    Ok(Some(connection)) => {
+                        self.connection = Some(connection);
+                        self.request_connection = None;
+                        self.screen = Screen::Gameplay;
+                        self.ui.connect_error = None;
+                    }
+                    Ok(None) => {}
+                    Err(_) => {
+                        self.screen = Screen::Connect;
+                        self.request_connection = None;
+                        self.ui.connect_error = Some("Server timed out.".into());
+                    }
                 }
-                Ok(None) => {},
-                Err(_) => {
-                    self.screen = Screen::Connect;
-                    self.request_connection = None;
-                    self.ui.connect_error = Some("Server timed out.".into());
-                }
-            },
+            }
             _ => {}
         }
         set_default_camera();

@@ -1,12 +1,16 @@
 use macroquad::prelude::*;
 use shared::math::remap;
+use shared::timer::Timer;
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 pub struct UiState {
     pub connect_error: Option<String>,
     input_name: InputState,
     input_ip: InputState,
+    connection_text_timer: Timer,
+    dot_count: usize,
 }
 
 impl Default for UiState {
@@ -29,6 +33,8 @@ impl Default for UiState {
             connect_error: None,
             input_ip,
             input_name,
+            connection_text_timer: Timer::new(Duration::from_millis(400)),
+            dot_count: 0,
         }
     }
 }
@@ -162,4 +168,15 @@ pub fn mouse_to_screen() -> Vec2 {
     }
 
     pos
+}
+
+pub fn draw_connection_screen(ui: &mut UiState) {
+    if ui.connection_text_timer.is_finished() {
+        ui.connection_text_timer.reset();
+        ui.dot_count += 1;
+        ui.dot_count %= 4;
+    }
+    
+    let text = format!("Connecting{}", ".".repeat(ui.dot_count));
+    draw_text(&text, 160., 120., 64., WHITE);
 }
