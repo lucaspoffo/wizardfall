@@ -24,10 +24,15 @@ use renet::{
 use glam::{vec2, Vec2};
 use shipyard::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
-// use std::thread::sleep;
+
+struct ServerInfo {
+    respawn_players: bool,
+    respawn_players_timer: Timer,
+    connected_players: HashSet<u64>,
+}
 
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {
@@ -38,9 +43,6 @@ async fn main() {
 }
 
 type PlayerMapping = HashMap<u64, EntityId>;
-
-#[derive(Debug, Default)]
-struct PlayerRespawn(HashMap<u64, Timer>);
 
 async fn server(ip: String) -> Result<(), RenetError> {
     let socket = UdpSocket::bind(ip)?;
@@ -54,8 +56,14 @@ async fn server(ip: String) -> Result<(), RenetError> {
 
     load_level_collisions(&mut world);
 
+    let server_info = ServerInfo {
+        respawn_players: false,
+        respawn_players_timer: Timer::new(Duration::from_secs(3)),
+        connected_players: HashSet::new(),
+    };
+
+    world.add_unique(server_info).unwrap();
     world.add_unique(PlayerMapping::new()).unwrap();
-    world.add_unique(PlayerRespawn::default()).unwrap();
     world.add_unique(PlayersScore::default()).unwrap();
 
     world.borrow::<ViewMut<Player>>().unwrap().track_deletion();
@@ -107,12 +115,6 @@ async fn server(ip: String) -> Result<(), RenetError> {
             }
         }
 
-        // Repawn player
-        let respawn_players = world.run(player_respawn).unwrap();
-        for client_id in respawn_players.iter() {
-            world.run_with_data(create_player, *client_id).unwrap();
-        }
-
         // Game logic
         world.run(update_players_cooldown).unwrap();
         world.run(update_animations).unwrap();
@@ -121,13 +123,44 @@ async fn server(ip: String) -> Result<(), RenetError> {
         world.run(cast_fireball_player).unwrap();
         world.run(sync_physics).unwrap();
 
+        // Debug physics
         world.run(render_physics).unwrap();
 
         world.run(remove_zero_health).unwrap();
         world.run(remove_dead).unwrap();
 
-        world.run(add_player_respawn).unwrap();
         world.run(destroy_physics_entities).unwrap();
+
+        let should_check_win = world
+            .run(|info: UniqueView<ServerInfo>| {
+                !info.respawn_players && info.connected_players.len() > 1
+            })
+            .unwrap();
+
+        if should_check_win {
+            if world.run(check_win_condition).unwrap() {
+                world.run(cleanup_world).unwrap();
+                world
+                    .run(|mut info: UniqueViewMut<ServerInfo>| {
+                        info.respawn_players_timer.reset();
+                        info.respawn_players = true;
+                    })
+                    .unwrap();
+            }
+        }
+
+        // Repawn player
+        if world.run(respawn_players).unwrap() {
+            let clients_id: Vec<u64> = world
+                .run(|info: UniqueView<ServerInfo>| {
+                    info.connected_players.iter().copied().collect()
+                })
+                .unwrap();
+
+            for &client_id in clients_id.iter() {
+                world.run_with_data(create_player, client_id).unwrap();
+            }
+        }
 
         let server_frame = ServerFrame::from_world(&world);
         // println!("{:?}", server_frame);
@@ -138,7 +171,7 @@ async fn server(ip: String) -> Result<(), RenetError> {
         server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
         server.send_packets();
 
-        // Serd score update to clients
+        // Send score update to clients
         {
             let mut score = world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
             if score.updated {
@@ -152,21 +185,28 @@ async fn server(ip: String) -> Result<(), RenetError> {
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected(id) => {
-                    world.run_with_data(create_player, id).unwrap();
                     world
-                        .run(|mut players_score: UniqueViewMut<PlayersScore>| {
-                            players_score.score.insert(id, 0);
-                            players_score.updated = true;
-                        })
+                        .run(
+                            |mut players_score: UniqueViewMut<PlayersScore>,
+                             mut info: UniqueViewMut<ServerInfo>| {
+                                info.connected_players.insert(id);
+                                players_score.score.insert(id, 0);
+                                players_score.updated = true;
+                            },
+                        )
                         .unwrap();
                 }
                 ServerEvent::ClientDisconnected(id) => {
                     world.run_with_data(remove_player, id).unwrap();
                     world
-                        .run(|mut players_score: UniqueViewMut<PlayersScore>| {
-                            players_score.score.remove(&id);
-                            players_score.updated = true;
-                        })
+                        .run(
+                            |mut players_score: UniqueViewMut<PlayersScore>,
+                             mut info: UniqueViewMut<ServerInfo>| {
+                                info.connected_players.remove(&id);
+                                players_score.score.remove(&id);
+                                players_score.updated = true;
+                            },
+                        )
                         .unwrap();
                 }
             }
@@ -423,52 +463,12 @@ fn remove_dead(mut all_storages: AllStoragesViewMut) {
     all_storages.delete_any::<SparseSet<Dead>>();
 }
 
-fn remove_zero_health(
-    health: View<Health>,
-    players: View<Player>,
-    mut deads: ViewMut<Dead>,
-    mut players_score: UniqueViewMut<PlayersScore>,
-) {
+fn remove_zero_health(health: View<Health>, mut deads: ViewMut<Dead>) {
     for (entity_id, h) in health.iter().with_id() {
         if h.is_dead() {
             deads.add_entity(entity_id, Dead);
-            if let Ok(_) = players.get(entity_id) {
-                if let Some(killer) = h.killer {
-                    let score = players_score.score.entry(killer).or_insert(0);
-                    *score += 1;
-                    players_score.updated = true;
-                }
-            }
         }
     }
-}
-
-fn add_player_respawn(
-    player_mapping: UniqueView<PlayerMapping>,
-    mut players: ViewMut<Player>,
-    mut player_respawn: UniqueViewMut<PlayerRespawn>,
-    mut physics: UniqueViewMut<Physics>,
-) {
-    for (entity_id, player) in players.take_deleted().iter() {
-        physics.remove_actor(entity_id);
-        if player_mapping.get(&player.client_id).is_some() {
-            let respawn_timer = Timer::new(Duration::from_secs(5));
-            player_respawn.0.insert(player.client_id, respawn_timer);
-        }
-    }
-}
-
-fn player_respawn(mut player_respawn: UniqueViewMut<PlayerRespawn>) -> Vec<u64> {
-    let mut respawn_players: Vec<u64> = vec![];
-    for (client_id, timer) in player_respawn.0.iter() {
-        if timer.is_finished() {
-            respawn_players.push(*client_id);
-        }
-    }
-
-    player_respawn.0.retain(|_, timer| !timer.is_finished());
-
-    respawn_players
 }
 
 fn sync_physics(
@@ -495,4 +495,37 @@ fn destroy_physics_entities(
     for (entity_id, _) in projectiles.take_deleted().iter() {
         physics.remove_actor(entity_id);
     }
+}
+
+fn check_win_condition(
+    players: View<Player>,
+    mut players_score: UniqueViewMut<PlayersScore>,
+) -> bool {
+    let win_codition = players.iter().count() <= 1;
+    println!("Player Components couny: {}", win_codition);
+    if win_codition {
+        if let Some(player) = players.iter().next() {
+            let score = players_score.score.entry(player.client_id).or_insert(0);
+            *score += 1;
+            players_score.updated = true;
+        }
+    }
+    win_codition
+}
+
+fn cleanup_world(mut all_storages: AllStoragesViewMut) {
+    all_storages.delete_any::<SparseSet<Player>>();
+    all_storages.delete_any::<SparseSet<Projectile>>();
+}
+
+fn respawn_players(mut info: UniqueViewMut<ServerInfo>) -> bool {
+    let mut respawn = false;
+    if info.respawn_players
+        && info.respawn_players_timer.is_finished()
+        && info.connected_players.len() > 1
+    {
+        info.respawn_players = false;
+        respawn = true;
+    }
+    respawn
 }
