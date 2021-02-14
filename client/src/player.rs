@@ -14,6 +14,7 @@ use crate::ClientInfo;
 
 pub fn draw_players(
     player_texture: UniqueView<AnimationTexture>,
+    // textures: UniqueView<HashMap<&str, Texture2D>>,
     players: View<Player>,
     transforms: View<Transform>,
     health: View<Health>,
@@ -37,7 +38,7 @@ pub fn draw_players(
         let wand_size = 12.0;
         let wand_x = center_x + player.direction.x * wand_size;
         let wand_y = center_y + player.direction.y * wand_size;
-
+        
         draw_line(center_x, center_y, wand_x, wand_y, 3.0, YELLOW);
         if player.fireball_charge > 0. {
             draw_circle(wand_x, wand_y, 3.0 + player.fireball_charge * 4., RED);
@@ -46,6 +47,16 @@ pub fn draw_players(
         } else {
             draw_circle(wand_x, wand_y, 3.0, BLACK);
         }
+        /*
+        let wand_texture = textures.get("wand").unwrap();
+        let wand_params = DrawTextureParams {
+            dest_size: Some(vec2(16., 16.)),
+            rotation: player.direction.angle_between(Vec2::unit_x()),
+            ..Default::default()
+        };
+        draw_texture_ex(*wand_texture, center_x * 30., center_y * 30., WHITE, wand_params);
+        */
+
         // Draw Player Health
         let current_life_percent = (player_health.current as f32) / (player_health.max as f32);
         let max_bar_width = 40.;
@@ -119,5 +130,11 @@ pub async fn load_player_texture(world: &mut World) {
 
     animations.insert(PlayerAnimation::Idle.into(), idle_animation);
     animations.insert(PlayerAnimation::Run.into(), run_animation);
+    let mut textures = HashMap::new();
+    let texture = load_texture("Arm.png").await;
+    set_texture_filter(texture, FilterMode::Nearest);
+    textures.insert("wand", texture);
+
+    world.add_unique(textures).unwrap();
     world.add_unique(animations).unwrap();
 }

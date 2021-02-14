@@ -47,6 +47,7 @@ impl TextureAnimation {
             x_size *= -1.0;
             draw_x += self.width as f32;
         }
+        
         let params = DrawTextureParams {
             source: Some(draw_rect),
             dest_size: Some(vec2(x_size, self.height as f32)),

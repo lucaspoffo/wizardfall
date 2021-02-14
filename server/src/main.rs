@@ -3,13 +3,13 @@ use shared::{
     animation::AnimationController,
     channels,
     ldtk::{load_level_collisions, PlayerRespawnPoints},
-    message::ServerMessages,
+    message::{ClientAction, ServerMessages},
     network::ServerFrame,
     physics::{render_physics, Physics},
-    player::{Player, PlayerAction, PlayerAnimation, PlayerInput},
+    player::{Player, PlayerAnimation, PlayerInput},
     projectile::{Projectile, ProjectileType},
     timer::Timer,
-    Health, PlayersScore, Transform,
+    ClientInfo, Health, LobbyInfo, PlayersScore, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -24,78 +24,88 @@ use renet::{
 use glam::{vec2, Vec2};
 use shipyard::*;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 
-struct ServerInfo {
+pub enum Scene {
+    Lobby,
+    Gameplay,
+}
+
+struct Game {
+    scene: Scene,
+    world: World,
+    server: Server<UnsecureServerProtocol>,
+    lobby_info: LobbyInfo,
+    lobby_updated: bool,
+}
+
+struct GameplayInfo {
     respawn_players: bool,
     respawn_players_timer: Timer,
-    connected_players: HashSet<u64>,
 }
+
+type PlayerMapping = HashMap<u64, EntityId>;
 
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {
     TermLogger::default().init().unwrap();
 
-    let ip = "127.0.0.1:5000".to_string();
-    server(ip).await.unwrap();
+    let mut game = Game::new("127.0.0.1:5000".parse().unwrap()).unwrap();
+    loop {
+        game.update();
+
+        next_frame().await;
+    }
 }
 
-type PlayerMapping = HashMap<u64, EntityId>;
+impl Game {
+    fn new(addr: SocketAddr) -> Result<Self, RenetError> {
+        let socket = UdpSocket::bind(addr)?;
+        let server_config = ServerConfig::default();
+        let endpoint_config = EndpointConfig::default();
 
-async fn server(ip: String) -> Result<(), RenetError> {
-    let socket = UdpSocket::bind(ip)?;
-    let server_config = ServerConfig::default();
-    let endpoint_config = EndpointConfig::default();
+        let server: Server<UnsecureServerProtocol> =
+            Server::new(socket, server_config, endpoint_config, channels())?;
 
-    let mut server: Server<UnsecureServerProtocol> =
-        Server::new(socket, server_config, endpoint_config, channels())?;
+        let mut world = World::new();
 
-    let mut world = World::new();
+        // Initialize entity world.
+        load_level_collisions(&mut world);
 
-    load_level_collisions(&mut world);
+        let server_info = GameplayInfo {
+            respawn_players: false,
+            respawn_players_timer: Timer::new(Duration::from_secs(3)),
+        };
 
-    let server_info = ServerInfo {
-        respawn_players: false,
-        respawn_players_timer: Timer::new(Duration::from_secs(3)),
-        connected_players: HashSet::new(),
-    };
+        world.add_unique(server_info).unwrap();
+        world.add_unique(PlayerMapping::new()).unwrap();
+        world.add_unique(PlayersScore::default()).unwrap();
 
-    world.add_unique(server_info).unwrap();
-    world.add_unique(PlayerMapping::new()).unwrap();
-    world.add_unique(PlayersScore::default()).unwrap();
+        world.borrow::<ViewMut<Player>>().unwrap().track_deletion();
+        world
+            .borrow::<ViewMut<Projectile>>()
+            .unwrap()
+            .track_deletion();
 
-    world.borrow::<ViewMut<Player>>().unwrap().track_deletion();
-    world
-        .borrow::<ViewMut<Projectile>>()
-        .unwrap()
-        .track_deletion();
+        Ok(Self {
+            world,
+            server,
+            scene: Scene::Lobby,
+            lobby_info: LobbyInfo::default(),
+            lobby_updated: false,
+        })
+    }
 
-    let viewport_height = 600.0;
-    let aspect = screen_width() / screen_height();
-    let viewport_width = viewport_height * aspect;
-
-    let camera = Camera2D {
-        zoom: vec2(
-            1.0 / viewport_width as f32 * 2.,
-            -1.0 / viewport_height as f32 * 2.,
-        ),
-        // TODO: remove tile size magic numbers
-        target: vec2(viewport_width / 2., viewport_height / 2.),
-        ..Default::default()
-    };
-
-    loop {
-        clear_background(BLACK);
-        set_camera(camera);
-        let start = Instant::now();
-
-        server.update(start);
-        for (client_id, messages) in server.get_messages_from_channel(0).iter() {
+    fn update(&mut self) {
+        self.lobby_updated = false;
+        self.server.update(Instant::now());
+        for (client_id, messages) in self.server.get_messages_from_channel(0).iter() {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
-                world
+                self.world
                     .run(
                         |player_mapping: UniqueView<PlayerMapping>,
                          mut inputs: ViewMut<PlayerInput>| {
@@ -108,40 +118,93 @@ async fn server(ip: String) -> Result<(), RenetError> {
             }
         }
 
-        for (client_id, messages) in server.get_messages_from_channel(2).iter() {
+        for (client_id, messages) in self.server.get_messages_from_channel(2).iter() {
             for message in messages.iter() {
-                let player_action: PlayerAction = deserialize(message).unwrap();
-                handle_player_action(&mut world, player_action, client_id);
+                let player_action: ClientAction = deserialize(message).unwrap();
+                self.handle_client_action(player_action, client_id);
             }
         }
 
+        while let Some(event) = self.server.get_event() {
+            match event {
+                ServerEvent::ClientConnected(id) => {
+                    self.lobby_info.clients.insert(id, ClientInfo::default());
+                    self.lobby_updated = true;
+
+                    self.world
+                        .run(|mut players_score: UniqueViewMut<PlayersScore>| {
+                            players_score.score.insert(id, 0);
+                            players_score.updated = true;
+                        })
+                        .unwrap();
+                }
+                ServerEvent::ClientDisconnected(id) => {
+                    self.lobby_info.clients.remove(&id);
+                    self.lobby_updated = true;
+
+                    self.world.run_with_data(remove_player, id).unwrap();
+                    self.world
+                        .run(|mut players_score: UniqueViewMut<PlayersScore>| {
+                            players_score.score.remove(&id);
+                            players_score.updated = true;
+                        })
+                        .unwrap();
+                }
+            }
+        }
+
+        match self.scene {
+            Scene::Lobby => {
+                let start_lobby = self.lobby_info.clients.len() > 1
+                    && self.lobby_info.clients.values().all(|c| c.ready);
+                if start_lobby {
+                    self.scene = Scene::Gameplay;
+                    let start_gameplay = ServerMessages::StartGameplay;
+                    let start_gameplay = serialize(&start_gameplay).unwrap().into_boxed_slice();
+                    self.server.send_message_to_all_clients(2, start_gameplay);
+                }
+                if self.lobby_updated {
+                    let lobby_update = ServerMessages::UpdateLobby(self.lobby_info.clone());
+                    let lobby_update = serialize(&lobby_update).unwrap().into_boxed_slice();
+                    self.server.send_message_to_all_clients(2, lobby_update);
+                }
+            }
+            Scene::Gameplay => {
+                self.update_gameplay();
+            }
+        }
+
+        self.server.send_packets();
+    }
+
+    fn update_gameplay(&mut self) {
         // Game logic
-        world.run(update_players_cooldown).unwrap();
-        world.run(update_animations).unwrap();
-        world.run(update_players).unwrap();
-        world.run(update_projectiles).unwrap();
-        world.run(cast_fireball_player).unwrap();
-        world.run(sync_physics).unwrap();
+        self.world.run(update_players_cooldown).unwrap();
+        self.world.run(update_animations).unwrap();
+        self.world.run(update_players).unwrap();
+        self.world.run(update_projectiles).unwrap();
+        self.world.run(cast_fireball_player).unwrap();
+        self.world.run(sync_physics).unwrap();
 
-        // Debug physics
-        world.run(render_physics).unwrap();
+        self.debug_physics();
 
-        world.run(remove_zero_health).unwrap();
-        world.run(remove_dead).unwrap();
+        // Clear dead entities
+        self.world.run(remove_zero_health).unwrap();
+        self.world.run(remove_dead).unwrap();
+        self.world.run(destroy_physics_entities).unwrap();
 
-        world.run(destroy_physics_entities).unwrap();
-
-        let should_check_win = world
-            .run(|info: UniqueView<ServerInfo>| {
-                !info.respawn_players && info.connected_players.len() > 1
+        let should_check_win = self
+            .world
+            .run(|info: UniqueView<GameplayInfo>| {
+                !info.respawn_players && self.lobby_info.clients.len() > 1
             })
             .unwrap();
 
         if should_check_win {
-            if world.run(check_win_condition).unwrap() {
-                world.run(cleanup_world).unwrap();
-                world
-                    .run(|mut info: UniqueViewMut<ServerInfo>| {
+            if self.world.run(check_win_condition).unwrap() {
+                self.world.run(cleanup_world).unwrap();
+                self.world
+                    .run(|mut info: UniqueViewMut<GameplayInfo>| {
                         info.respawn_players_timer.reset();
                         info.respawn_players = true;
                     })
@@ -149,82 +212,60 @@ async fn server(ip: String) -> Result<(), RenetError> {
             }
         }
 
-        // Repawn player
-        if world.run(respawn_players).unwrap() {
-            let clients_id: Vec<u64> = world
-                .run(|info: UniqueView<ServerInfo>| {
-                    info.connected_players.iter().copied().collect()
-                })
-                .unwrap();
-
-            for &client_id in clients_id.iter() {
-                world.run_with_data(create_player, client_id).unwrap();
+        let respawn = self
+            .world
+            .run_with_data(respawn_players, self.lobby_info.clients.len())
+            .unwrap();
+        if respawn {
+            for &client_id in self.lobby_info.clients.keys() {
+                self.world.run_with_data(create_player, client_id).unwrap();
             }
         }
 
-        let server_frame = ServerFrame::from_world(&world);
-        // println!("{:?}", server_frame);
+        let server_frame = ServerFrame::from_world(&self.world);
+        let server_frame = serialize(&server_frame).unwrap().into_boxed_slice();
 
-        let server_frame = serialize(&server_frame).expect("Failed to serialize state");
-        // println!("Server Frame Size: {} bytes", server_frame.len());
-
-        server.send_message_to_all_clients(1, server_frame.into_boxed_slice());
-        server.send_packets();
+        self.server.send_message_to_all_clients(1, server_frame);
 
         // Send score update to clients
         {
-            let mut score = world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
+            let mut score = self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
             if score.updated {
                 let score_message = ServerMessages::UpdateScore((*score).clone());
                 let score_message = serialize(&score_message).expect("Failed to serialize score");
-                server.send_message_to_all_clients(2, score_message.into_boxed_slice());
+                self.server
+                    .send_message_to_all_clients(2, score_message.into_boxed_slice());
                 score.updated = false;
             }
         }
+    }
 
-        while let Some(event) = server.get_event() {
-            match event {
-                ServerEvent::ClientConnected(id) => {
-                    world
-                        .run(
-                            |mut players_score: UniqueViewMut<PlayersScore>,
-                             mut info: UniqueViewMut<ServerInfo>| {
-                                info.connected_players.insert(id);
-                                players_score.score.insert(id, 0);
-                                players_score.updated = true;
-                            },
-                        )
-                        .unwrap();
-                }
-                ServerEvent::ClientDisconnected(id) => {
-                    world.run_with_data(remove_player, id).unwrap();
-                    world
-                        .run(
-                            |mut players_score: UniqueViewMut<PlayersScore>,
-                             mut info: UniqueViewMut<ServerInfo>| {
-                                info.connected_players.remove(&id);
-                                players_score.score.remove(&id);
-                                players_score.updated = true;
-                            },
-                        )
-                        .unwrap();
-                }
+    fn debug_physics(&self) {
+        let viewport_height = 640.0;
+        let aspect = screen_width() / screen_height();
+        let viewport_width = viewport_height * aspect;
+
+        let camera = Camera2D {
+            zoom: vec2(
+                1.0 / viewport_width as f32 * 2.,
+                -1.0 / viewport_height as f32 * 2.,
+            ),
+            target: vec2(viewport_width / 2., viewport_height / 2.),
+            ..Default::default()
+        };
+        clear_background(BLACK);
+        set_camera(camera);
+        self.world.run(render_physics).unwrap();
+    }
+
+    fn handle_client_action(&mut self, action: ClientAction, client_id: &u64) {
+        match action {
+            ClientAction::LobbyReady => {
+                let client_info = self.lobby_info.clients.get_mut(client_id).unwrap();
+                client_info.ready = !client_info.ready;
+                self.lobby_updated = true;
             }
         }
-
-        /*
-        let now = Instant::now();
-        let frame_duration = Duration::from_micros(16666);
-        if let Some(wait) = (start + frame_duration).checked_duration_since(now) {
-            sleep(wait);
-        }*/
-        next_frame().await;
-    }
-}
-
-fn handle_player_action(_world: &mut World, player_action: PlayerAction, _client_id: &u64) {
-    match player_action {
-        _ => {}
     }
 }
 
@@ -502,7 +543,6 @@ fn check_win_condition(
     mut players_score: UniqueViewMut<PlayersScore>,
 ) -> bool {
     let win_codition = players.iter().count() <= 1;
-    println!("Player Components couny: {}", win_codition);
     if win_codition {
         if let Some(player) = players.iter().next() {
             let score = players_score.score.entry(player.client_id).or_insert(0);
@@ -518,12 +558,9 @@ fn cleanup_world(mut all_storages: AllStoragesViewMut) {
     all_storages.delete_any::<SparseSet<Projectile>>();
 }
 
-fn respawn_players(mut info: UniqueViewMut<ServerInfo>) -> bool {
+fn respawn_players(connected_players: usize, mut info: UniqueViewMut<GameplayInfo>) -> bool {
     let mut respawn = false;
-    if info.respawn_players
-        && info.respawn_players_timer.is_finished()
-        && info.connected_players.len() > 1
-    {
+    if info.respawn_players && info.respawn_players_timer.is_finished() && connected_players > 1 {
         info.respawn_players = false;
         respawn = true;
     }

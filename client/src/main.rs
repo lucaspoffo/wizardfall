@@ -2,11 +2,11 @@ use macroquad::prelude::*;
 use shared::{
     channels,
     ldtk::{draw_level, load_project_and_assets},
-    message::ServerMessages,
+    message::{ClientAction, ServerMessages},
     network::ServerFrame,
     player::Player,
     projectile::Projectile,
-    EntityMapping, PlayersScore, Transform,
+    EntityMapping, LobbyInfo, PlayersScore, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -16,7 +16,7 @@ use renet::{
     protocol::unsecure::UnsecureClientProtocol,
 };
 use shipyard::*;
-use ui::{draw_connect_menu, draw_connection_screen, UiState};
+use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, UiState};
 
 use std::collections::HashMap;
 use std::net::UdpSocket;
@@ -60,6 +60,7 @@ async fn main() {
 pub enum Screen {
     MainMenu,
     Connect,
+    Lobby,
     Gameplay,
     Connecting,
 }
@@ -72,6 +73,7 @@ struct App {
     render_target: RenderTarget,
     connection: Option<ClientConnected>,
     request_connection: Option<RequestConnection>,
+    lobby_info: LobbyInfo,
     ui: UiState,
 }
 
@@ -111,6 +113,7 @@ impl App {
             camera,
             screen: Screen::Connect,
             request_connection: None,
+            lobby_info: LobbyInfo::default(),
             connection: None,
         }
     }
@@ -118,6 +121,28 @@ impl App {
     async fn update(&mut self) {
         set_camera(self.camera);
         clear_background(BLACK);
+
+        if let Some(connection) = self.connection.as_mut() {
+            if let Err(e) = connection.process_events(Instant::now()) {
+                println!("{}", e);
+            };
+            for payload in connection.receive_all_messages_from_channel(2).iter() {
+                let server_message: ServerMessages = bincode::deserialize(payload).unwrap();
+                match server_message {
+                    ServerMessages::UpdateScore(score) => {
+                        let mut player_scores =
+                            self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
+                        player_scores.score = score.score;
+                    }
+                    ServerMessages::UpdateLobby(lobby_info) => {
+                        self.lobby_info = lobby_info;
+                    }
+                    ServerMessages::StartGameplay => {
+                        self.screen = Screen::Gameplay;
+                    }
+                }
+            }
+        }
 
         match self.screen {
             Screen::Gameplay => {
@@ -150,7 +175,7 @@ impl App {
                     Ok(Some(connection)) => {
                         self.connection = Some(connection);
                         self.request_connection = None;
-                        self.screen = Screen::Gameplay;
+                        self.screen = Screen::Lobby;
                         self.ui.connect_error = None;
                     }
                     Ok(None) => {}
@@ -161,8 +186,25 @@ impl App {
                     }
                 }
             }
-            _ => {}
+            Screen::Lobby => {
+                if let Some(connection) = self.connection.as_mut() {
+                    if draw_lobby(&self.lobby_info, self.id) {
+                        let message = bincode::serialize(&ClientAction::LobbyReady).unwrap();
+                        connection.send_message(2, message.into_boxed_slice());
+                    }
+                } else {
+                    self.screen = Screen::Connect;
+                    self.lobby_info = LobbyInfo::default();
+                }
+            }
+            Screen::MainMenu => {}
         }
+
+        // Send messages to server
+        if let Some(connection) = self.connection.as_mut() {
+            connection.send_packets().unwrap();
+        }
+
         set_default_camera();
         clear_background(RED);
 
@@ -203,37 +245,17 @@ impl App {
         self.world.run(track_client_entity).unwrap();
 
         let input = self.world.run(player_input).unwrap();
-        let message = bincode::serialize(&input).expect("Failed to serialize message.");
+        let message = bincode::serialize(&input).expect("failed to serialize message.");
         connection.send_message(0, message.into_boxed_slice());
-        connection.send_packets().unwrap();
-
-        if let Err(e) = connection.process_events(Instant::now()) {
-            println!("{}", e);
-        };
 
         for payload in connection.receive_all_messages_from_channel(1).iter() {
-            let server_frame: ServerFrame =
-                bincode::deserialize(payload).expect("Failed to deserialize state.");
-
+            let server_frame: ServerFrame = bincode::deserialize(payload).unwrap();
             server_frame.apply_in_world(&self.world);
-        }
-
-        for payload in connection.receive_all_messages_from_channel(2).iter() {
-            let server_message: ServerMessages =
-                bincode::deserialize(payload).expect("Failed to deserialize state.");
-            match server_message {
-                ServerMessages::UpdateScore(score) => {
-                    let mut player_scores =
-                        self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
-                    player_scores.score = score.score;
-                }
-            }
         }
 
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
-
         self.world.run(draw_score).unwrap();
     }
 }

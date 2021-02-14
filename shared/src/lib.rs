@@ -64,6 +64,22 @@ impl Transform {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientInfo {
+    pub ready: bool,
+}
+
+impl Default for ClientInfo {
+    fn default() -> Self {
+        Self { ready: false }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct LobbyInfo {
+    pub clients: HashMap<u64, ClientInfo>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct PlayersScore {
     pub score: HashMap<u64, u8>,

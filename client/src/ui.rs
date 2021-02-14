@@ -1,6 +1,7 @@
 use macroquad::prelude::*;
 use shared::math::remap;
 use shared::timer::Timer;
+use shared::{ClientInfo, LobbyInfo};
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -27,7 +28,6 @@ impl Default for UiState {
             text: "127.0.0.1:5000".into(),
             ..Default::default()
         };
-        
 
         Self {
             connect_error: None,
@@ -107,7 +107,7 @@ pub fn draw_connect_menu(ui: &mut UiState) -> Option<SocketAddr> {
     ui.input_name.draw();
 
     if let Some(error) = ui.connect_error.as_ref() {
-        draw_text(&error,(640. - 270.) / 2. , 215., 32., RED);
+        draw_text(&error, (640. - 270.) / 2., 215., 32., RED);
     }
 
     if draw_button(Rect::new((640. - 120.) / 2., 270.0, 120., 30.), &"connect") {
@@ -176,7 +176,28 @@ pub fn draw_connection_screen(ui: &mut UiState) {
         ui.dot_count += 1;
         ui.dot_count %= 4;
     }
-    
+
     let text = format!("Connecting{}", ".".repeat(ui.dot_count));
     draw_text(&text, 160., 120., 64., WHITE);
+}
+
+pub fn draw_lobby(lobby_info: &LobbyInfo, id: u64) -> bool {
+    let mut response = false;
+    let mut clients: Vec<(&u64, &ClientInfo)> = lobby_info.clients.iter().collect();
+    clients.sort_by(|a, b| a.0.cmp(b.0));
+    for (i, (&client_id, client_info)) in clients.iter().enumerate() {
+        let x = 40. + i as f32 * 140.;
+        draw_text(&client_id.to_string(), x, 20., 16., WHITE);
+        let text = if client_info.ready {
+            "ready"
+        } else {
+            "waiting"
+        };
+        if client_id == id {
+            response = draw_button(Rect::new(x, 70., 120., 40.), &text);
+        } else {
+            draw_text(&text, x, 62., 32., WHITE);
+        }
+    }
+    response
 }

@@ -77,11 +77,6 @@ pub struct CastTarget {
     pub position: Vec2,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum PlayerAction {
-    CastFireball(CastTarget),
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum PlayerAnimation {
     Idle,

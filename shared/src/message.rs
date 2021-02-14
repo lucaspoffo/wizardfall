@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
-
-use crate::{player::PlayerInput, network::ServerFrame, PlayersScore};
+use crate::player::PlayerInput;
+use crate::network::ServerFrame;
+use crate::{PlayersScore, LobbyInfo};
 
 pub enum Messages {
     PlayerInput(PlayerInput),
@@ -9,5 +10,13 @@ pub enum Messages {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessages {
-    UpdateScore(PlayersScore)
+    UpdateScore(PlayersScore),
+    UpdateLobby(LobbyInfo),
+    StartGameplay,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ClientAction {
+    LobbyReady,
+}
+
