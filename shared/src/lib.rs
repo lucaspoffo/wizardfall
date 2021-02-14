@@ -18,6 +18,7 @@ pub mod player;
 pub mod projectile;
 pub mod timer;
 pub mod physics;
+pub mod math;
 
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;

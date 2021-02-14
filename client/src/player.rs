@@ -8,10 +8,9 @@ use shared::{
 use shipyard::*;
 use std::collections::HashMap;
 
-use crate::{
-    animation::{AnimationTexture, TextureAnimation},
-    ClientInfo,
-};
+use crate::animation::{AnimationTexture, TextureAnimation};
+use crate::ui::mouse_to_screen;
+use crate::ClientInfo;
 
 pub fn draw_players(
     player_texture: UniqueView<AnimationTexture>,
@@ -59,7 +58,6 @@ pub fn draw_players(
 }
 
 pub fn player_input(
-    camera: &Camera2D,
     transforms: View<Transform>,
     client_info: UniqueView<ClientInfo>,
 ) -> PlayerInput {
@@ -70,10 +68,7 @@ pub fn player_input(
     let entity_id = client_info.entity_id.unwrap();
     let transform = transforms.get(entity_id).unwrap();
 
-    let mut mouse_world_position = camera.screen_to_world(mouse_position().into());
-    mouse_world_position.y = 320. - mouse_world_position.y;
-
-    let direction = (mouse_world_position - transform.position).normalize();
+    let direction = (mouse_to_screen() - transform.position).normalize();
 
     let up = is_key_down(KeyCode::W) || is_key_down(KeyCode::Up);
     let down = is_key_down(KeyCode::S) || is_key_down(KeyCode::Down);

@@ -307,7 +307,7 @@ impl Physics {
                 if ix >= 0 && ix < static_colliders.len() as i32 && static_colliders[ix as usize] {
                     return *layer_tag == tag;
                 }
-                return false;
+                false
             };
 
             if check(pos)
@@ -319,33 +319,29 @@ impl Physics {
             }
 
             if width > *tile_width as i32 {
-                let mut x = pos.x;
+                let mut x = pos.x + tile_width;
 
-                while {
-                    x += tile_width;
-                    x < pos.x + width as f32 - 1.
-                } {
+                while x < pos.x + width as f32 - 1. {
                     if check(vec2(x, pos.y)) || check(vec2(x, pos.y + height as f32 - 1.0)) {
                         return true;
                     }
+                    x += tile_width;
                 }
             }
 
             if height > *tile_height as i32 {
-                let mut y = pos.y;
+                let mut y = pos.y + tile_height;
 
-                while {
-                    y += tile_height;
-                    y < pos.y + height as f32 - 1.
-                } {
+                while y < pos.y + height as f32 - 1. {
                     if check(vec2(pos.x, y)) || check(vec2(pos.x + width as f32 - 1., y)) {
                         return true;
                     }
+                    y += tile_height;
                 }
             }
         }
 
-        return false;
+        false
     }
 
     pub fn squished(&self, actor: EntityId) -> bool {
@@ -380,7 +376,14 @@ pub fn render_physics(world: UniqueView<Physics>) {
             if collider {
                 let x = (i % layer.width) as f32 * layer.tile_width;
                 let y = (i / layer.width) as f32 * layer.tile_height;
-                draw_rectangle_lines(x, y, layer.tile_width, layer.tile_height, 1.0, layer.debug_color)
+                draw_rectangle_lines(
+                    x,
+                    y,
+                    layer.tile_width,
+                    layer.tile_height,
+                    1.0,
+                    layer.debug_color,
+                )
             }
         }
     }

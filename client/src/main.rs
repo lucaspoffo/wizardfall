@@ -13,18 +13,18 @@ use alto_logger::TermLogger;
 use renet::{
     client::{ClientConnected, RequestConnection},
     endpoint::EndpointConfig,
-    error::RenetError,
     protocol::unsecure::UnsecureClientProtocol,
 };
 use shipyard::*;
+use ui::{draw_connect_menu, UiState};
 
 use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::thread::sleep;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 mod animation;
 mod player;
+mod ui;
 
 use crate::player::{draw_players, load_player_texture, player_input, track_client_entity};
 
@@ -39,8 +39,7 @@ async fn main() {
     );
 
     let id = rand::rand() as u64;
-    let connection = get_connection("127.0.0.1:5000".to_string(), id as u64).unwrap();
-    let mut app = App::new(id, connection);
+    let mut app = App::new(id);
 
     let mapping: EntityMapping = HashMap::new();
     app.world.add_unique(mapping).unwrap();
@@ -58,36 +57,22 @@ async fn main() {
     }
 }
 
-fn get_connection(ip: String, id: u64) -> Result<ClientConnected, RenetError> {
-    let socket = UdpSocket::bind("127.0.0.1:0")?;
-    let endpoint_config = EndpointConfig::default();
-
-    println!("Client ID: {}", id);
-
-    let mut request_connection = RequestConnection::new(
-        id,
-        socket,
-        ip.parse().unwrap(),
-        Box::new(UnsecureClientProtocol::new(id)),
-        endpoint_config,
-        channels(),
-    )?;
-
-    loop {
-        println!("Connecting with server.");
-        if let Some(connection) = request_connection.update()? {
-            return Ok(connection);
-        };
-        sleep(Duration::from_millis(20));
-    }
+pub enum Screen {
+    MainMenu,
+    Connect,
+    Gameplay,
+    Connecting,
 }
 
 struct App {
-    _id: u64,
+    id: u64,
+    screen: Screen,
     world: World,
     camera: Camera2D,
     render_target: RenderTarget,
-    connection: ClientConnected,
+    connection: Option<ClientConnected>,
+    request_connection: Option<RequestConnection>,
+    ui: UiState,
 }
 
 pub struct ClientInfo {
@@ -96,8 +81,8 @@ pub struct ClientInfo {
 }
 
 impl App {
-    fn new(id: u64, connection: ClientConnected) -> Self {
-        let render_target = render_target(640, 368);
+    fn new(id: u64) -> Self {
+        let render_target = render_target(640, 320);
         set_texture_filter(render_target.texture, FilterMode::Nearest);
 
         let camera = Camera2D {
@@ -120,10 +105,13 @@ impl App {
 
         Self {
             render_target,
-            _id: id,
+            id,
+            ui: UiState::default(),
             world,
             camera,
-            connection,
+            screen: Screen::Connect,
+            request_connection: None,
+            connection: None,
         }
     }
 
@@ -131,43 +119,47 @@ impl App {
         set_camera(self.camera);
         clear_background(BLACK);
 
-        self.world.run(track_client_entity).unwrap();
+        match self.screen {
+            Screen::Gameplay => {
+                self.render_gameplayer();
+            }
+            Screen::Connect => {
+                if let Some(server_ip) = draw_connect_menu(&mut self.ui) {
+                    self.screen = Screen::Connecting;
+                    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+                    let endpoint_config = EndpointConfig::default();
 
-        let input = self
-            .world
-            .run_with_data(player_input, &self.camera)
-            .unwrap();
-        let message = bincode::serialize(&input).expect("Failed to serialize message.");
-        self.connection.send_message(0, message.into_boxed_slice());
-        self.connection.send_packets().unwrap();
+                    println!("Client ID: {}", self.id);
 
-        if let Err(e) = self.connection.process_events(Instant::now()) {
-            println!("{}", e);
-        };
+                    let request_connection = RequestConnection::new(
+                        self.id,
+                        socket,
+                        server_ip,
+                        Box::new(UnsecureClientProtocol::new(self.id)),
+                        endpoint_config,
+                        channels(),
+                    )
+                    .unwrap();
 
-        for payload in self.connection.receive_all_messages_from_channel(1).iter() {
-            let server_frame: ServerFrame =
-                bincode::deserialize(payload).expect("Failed to deserialize state.");
-
-            server_frame.apply_in_world(&self.world);
-        }
-
-        for payload in self.connection.receive_all_messages_from_channel(2).iter() {
-            let server_message: ServerMessages =
-                bincode::deserialize(payload).expect("Failed to deserialize state.");
-            match server_message {
-                ServerMessages::UpdateScore(score) => {
-                    let mut player_scores =
-                        self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
-                    player_scores.score = score.score;
+                    self.request_connection = Some(request_connection);
                 }
             }
+            Screen::Connecting => match self.request_connection.as_mut().unwrap().update() {
+                Ok(Some(connection)) => {
+                    self.connection = Some(connection);
+                    self.request_connection = None;
+                    self.screen = Screen::Gameplay;
+                    self.ui.connect_error = None;
+                }
+                Ok(None) => {},
+                Err(_) => {
+                    self.screen = Screen::Connect;
+                    self.request_connection = None;
+                    self.ui.connect_error = Some("Server timed out.".into());
+                }
+            },
+            _ => {}
         }
-
-        self.world.run(draw_level).unwrap();
-        self.world.run(draw_players).unwrap();
-        self.world.run(draw_projectiles).unwrap();
-
         set_default_camera();
         clear_background(RED);
 
@@ -196,6 +188,48 @@ impl App {
                 ..Default::default()
             },
         );
+    }
+
+    fn render_gameplayer(&mut self) {
+        if self.connection.is_none() {
+            return;
+        }
+
+        let connection = self.connection.as_mut().unwrap();
+
+        self.world.run(track_client_entity).unwrap();
+
+        let input = self.world.run(player_input).unwrap();
+        let message = bincode::serialize(&input).expect("Failed to serialize message.");
+        connection.send_message(0, message.into_boxed_slice());
+        connection.send_packets().unwrap();
+
+        if let Err(e) = connection.process_events(Instant::now()) {
+            println!("{}", e);
+        };
+
+        for payload in connection.receive_all_messages_from_channel(1).iter() {
+            let server_frame: ServerFrame =
+                bincode::deserialize(payload).expect("Failed to deserialize state.");
+
+            server_frame.apply_in_world(&self.world);
+        }
+
+        for payload in connection.receive_all_messages_from_channel(2).iter() {
+            let server_message: ServerMessages =
+                bincode::deserialize(payload).expect("Failed to deserialize state.");
+            match server_message {
+                ServerMessages::UpdateScore(score) => {
+                    let mut player_scores =
+                        self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
+                    player_scores.score = score.score;
+                }
+            }
+        }
+
+        self.world.run(draw_level).unwrap();
+        self.world.run(draw_players).unwrap();
+        self.world.run(draw_projectiles).unwrap();
 
         self.world.run(draw_score).unwrap();
     }
