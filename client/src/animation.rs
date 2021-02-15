@@ -2,6 +2,8 @@ use macroquad::prelude::*;
 use shared::animation::{Animation, AnimationController};
 use std::collections::HashMap;
 
+use crate::UPSCALE;
+
 pub type AnimationTexture = HashMap<Animation, TextureAnimation>;
 
 pub struct TextureAnimation {
@@ -50,10 +52,10 @@ impl TextureAnimation {
         
         let params = DrawTextureParams {
             source: Some(draw_rect),
-            dest_size: Some(vec2(x_size, self.height as f32)),
+            dest_size: Some(vec2(x_size * UPSCALE, self.height as f32 * UPSCALE)),
             ..Default::default()
         };
 
-        draw_texture_ex(self.texture, draw_x, y, WHITE, params);
+        draw_texture_ex(self.texture, draw_x * UPSCALE, y * UPSCALE, WHITE, params);
     }
 }

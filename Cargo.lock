@@ -80,6 +80,7 @@ version = "0.1.0"
 dependencies = [
  "alto_logger",
  "bincode",
+ "ldtk_rust",
  "log",
  "macroquad",
  "renet",

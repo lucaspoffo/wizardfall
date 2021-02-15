@@ -1,7 +1,6 @@
 use macroquad::prelude::*;
 use shared::{
     channels,
-    ldtk::{draw_level, load_project_and_assets},
     message::{ClientAction, ServerMessages},
     network::ServerFrame,
     player::Player,
@@ -16,15 +15,18 @@ use renet::{
     protocol::unsecure::UnsecureClientProtocol,
 };
 use shipyard::*;
-use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, UiState};
+use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, draw_score, UiState};
 
 use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use level::{draw_level, load_project_and_assets};
+
 mod animation;
 mod player;
 mod ui;
+mod level;
 
 use crate::player::{draw_players, load_player_texture, player_input, track_client_entity};
 
@@ -57,6 +59,10 @@ async fn main() {
     }
 }
 
+pub const RX: f32 = 336.;
+pub const RY: f32 = 192.;
+pub const UPSCALE: f32 = 10.;
+
 pub enum Screen {
     MainMenu,
     Connect,
@@ -84,13 +90,13 @@ pub struct ClientInfo {
 
 impl App {
     fn new(id: u64) -> Self {
-        let render_target = render_target(640, 320);
+        let render_target = render_target((RX * UPSCALE) as u32, (RY * UPSCALE) as u32);
         set_texture_filter(render_target.texture, FilterMode::Nearest);
 
         let camera = Camera2D {
-            zoom: vec2(1.0 / 640. * 2., 1.0 / 320. * 2.),
+            zoom: vec2(1.0 / (RX * UPSCALE) * 2., 1.0 / (RY * UPSCALE) * 2.),
             render_target: Some(render_target),
-            target: vec2(320., 160.),
+            target: vec2((RX * UPSCALE) / 2., (RY * UPSCALE) / 2.),
             ..Default::default()
         };
 
@@ -208,7 +214,7 @@ impl App {
         set_default_camera();
         clear_background(RED);
 
-        let desired_aspect_ratio = 640. / 320.;
+        let desired_aspect_ratio = RX / RY;
         let current_aspect_ratio = screen_width() / screen_height();
         let mut viewport_height = screen_width() / desired_aspect_ratio;
         let mut viewport_width = screen_height() * desired_aspect_ratio;
@@ -260,19 +266,9 @@ impl App {
     }
 }
 
-fn draw_score(players_score: UniqueView<PlayersScore>) {
-    let mut offset_x = 0.;
-    for (client_id, score) in players_score.score.iter() {
-        let text = format!("{}: {}", client_id, score);
-        draw_rectangle_lines(27. + offset_x, 23., 190., 40., 1., WHITE);
-        draw_text(&text, 30. + offset_x, 20., 30., WHITE);
-        offset_x += 200.;
-    }
-}
-
 fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     for (_, transform) in (&projectiles, &transform).iter() {
-        draw_rectangle(transform.position.x, transform.position.y, 16.0, 16.0, RED);
+        draw_rectangle(transform.position.x * UPSCALE, transform.position.y * UPSCALE, 16.0 * UPSCALE, 16.0 * UPSCALE, RED);
     }
 }
 

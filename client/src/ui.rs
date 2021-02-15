@@ -1,10 +1,28 @@
 use macroquad::prelude::*;
 use shared::math::remap;
 use shared::timer::Timer;
-use shared::{ClientInfo, LobbyInfo};
+use shared::{ClientInfo, LobbyInfo, PlayersScore};
+use shipyard::UniqueView;
 
 use std::net::SocketAddr;
 use std::time::Duration;
+
+use crate::{RX, RY, UPSCALE};
+
+pub fn draw_text_upscaled(text: &str, x: f32, y: f32, font_size: f32, color: Color) {
+    draw_text(text, x * UPSCALE, y * UPSCALE, font_size * UPSCALE, color);
+}
+
+pub fn draw_rectangle_lines_upscaled(x: f32, y: f32, w: f32, h: f32, thickness: f32, color: Color) {
+    draw_rectangle_lines(
+        x * UPSCALE,
+        y * UPSCALE,
+        w * UPSCALE,
+        h * UPSCALE,
+        thickness * UPSCALE,
+        color,
+    );
+}
 
 pub struct UiState {
     pub connect_error: Option<String>,
@@ -17,13 +35,13 @@ pub struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         let input_name = InputState {
-            rect: Rect::new((640. - 264.) / 2., 120.0, 300., 30.),
+            rect: Rect::new(RX / 2. - 50., 80.0, 150., 20.),
             label: "Name:".into(),
             ..Default::default()
         };
 
         let input_ip = InputState {
-            rect: Rect::new((640. - 264.) / 2., 180.0, 300., 30.),
+            rect: Rect::new(RX / 2. - 50., 110.0, 150., 20.),
             label: "IP:".into(),
             text: "127.0.0.1:5000".into(),
             ..Default::default()
@@ -84,40 +102,18 @@ impl InputState {
     fn draw(&self) {
         let color = if self.focused { YELLOW } else { WHITE };
 
-        draw_text(&self.label, self.rect.x - 70., self.rect.y - 8., 32., WHITE);
+        draw_text_upscaled(&self.label, self.rect.x - 40., self.rect.y - 2., 16., WHITE);
 
-        draw_rectangle_lines(
+        draw_rectangle_lines_upscaled(
             self.rect.x,
             self.rect.y,
             self.rect.w,
             self.rect.h,
-            4.0,
+            2.0,
             color,
         );
-        draw_text(&self.text, self.rect.x + 10., self.rect.y - 8., 32., WHITE);
+        draw_text_upscaled(&self.text, self.rect.x + 4., self.rect.y - 2., 16., WHITE);
     }
-}
-
-pub fn draw_connect_menu(ui: &mut UiState) -> Option<SocketAddr> {
-    let mouse_position = mouse_to_screen();
-    ui.input_ip.update(mouse_position);
-    ui.input_ip.draw();
-
-    ui.input_name.update(mouse_position);
-    ui.input_name.draw();
-
-    if let Some(error) = ui.connect_error.as_ref() {
-        draw_text(&error, (640. - 270.) / 2., 215., 32., RED);
-    }
-
-    if draw_button(Rect::new((640. - 120.) / 2., 270.0, 120., 30.), &"connect") {
-        if let Ok(ip) = ui.input_ip.text.parse() {
-            return Some(ip);
-        } else {
-            ui.connect_error = Some("Invalid IP address".into());
-        }
-    }
-    None
 }
 
 fn draw_button(rect: Rect, text: &str) -> bool {
@@ -132,16 +128,38 @@ fn draw_button(rect: Rect, text: &str) -> bool {
         WHITE
     };
 
-    draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, color);
-    draw_text(text, rect.x + 10., rect.y - 8., 32., color);
+    draw_rectangle_lines_upscaled(rect.x, rect.y, rect.w, rect.h, 2.0, color);
+    draw_text_upscaled(text, rect.x + 4., rect.y - 2., 16., color);
 
     clicked
 }
 
+pub fn draw_connect_menu(ui: &mut UiState) -> Option<SocketAddr> {
+    let mouse_position = mouse_to_screen();
+    ui.input_ip.update(mouse_position);
+    ui.input_ip.draw();
+
+    ui.input_name.update(mouse_position);
+    ui.input_name.draw();
+
+    if let Some(error) = ui.connect_error.as_ref() {
+        draw_text_upscaled(&error, (RX - 100.) / 2., 130., 16., RED);
+    }
+
+    if draw_button(Rect::new((RX - 60.) / 2., 160.0, 58., 20.), &"connect") {
+        if let Ok(ip) = ui.input_ip.text.parse() {
+            return Some(ip);
+        } else {
+            ui.connect_error = Some("Invalid IP address".into());
+        }
+    }
+    None
+}
+
 pub fn mouse_to_screen() -> Vec2 {
     let mut pos: Vec2 = mouse_position().into();
-
-    let desired_aspect_ratio = 640. / 320.;
+    
+    let desired_aspect_ratio = RX / RY;
     let current_aspect_ratio = screen_width() / screen_height();
 
     let viewport_width = screen_height() * desired_aspect_ratio;
@@ -151,20 +169,20 @@ pub fn mouse_to_screen() -> Vec2 {
         let start = -remap(
             (screen_width() - viewport_width) / 2.,
             0.0..=viewport_width,
-            0.0..=640.,
+            0.0..=RX,
         );
-        let end = 640. - start;
+        let end = RX - start;
         pos.x = remap(pos.x, 0.0..=screen_width(), start..=end);
-        pos.y = remap(pos.y, 0.0..=screen_height(), 0.0..=320.);
+        pos.y = remap(pos.y, 0.0..=screen_height(), 0.0..=RY);
     } else if current_aspect_ratio < desired_aspect_ratio {
         let start = -remap(
             (screen_height() - viewport_height) / 2.,
             0.0..=viewport_height,
-            0.0..=320.,
+            0.0..=RY,
         );
-        let end = 320. - start;
+        let end = RY - start;
         pos.y = remap(pos.y, 0.0..=screen_height(), start..=end);
-        pos.x = remap(pos.x, 0.0..=screen_width(), 0.0..=640.);
+        pos.x = remap(pos.x, 0.0..=screen_width(), 0.0..=RX);
     }
 
     pos
@@ -178,7 +196,7 @@ pub fn draw_connection_screen(ui: &mut UiState) {
     }
 
     let text = format!("Connecting{}", ".".repeat(ui.dot_count));
-    draw_text(&text, 160., 120., 64., WHITE);
+    draw_text_upscaled(&text, (RX - 140.) / 2. , (RY - 40.) / 2., 32., WHITE);
 }
 
 pub fn draw_lobby(lobby_info: &LobbyInfo, id: u64) -> bool {
@@ -186,18 +204,28 @@ pub fn draw_lobby(lobby_info: &LobbyInfo, id: u64) -> bool {
     let mut clients: Vec<(&u64, &ClientInfo)> = lobby_info.clients.iter().collect();
     clients.sort_by(|a, b| a.0.cmp(b.0));
     for (i, (&client_id, client_info)) in clients.iter().enumerate() {
-        let x = 40. + i as f32 * 140.;
-        draw_text(&client_id.to_string(), x, 20., 16., WHITE);
+        let x = 10. + i as f32 * 80.;
+        draw_text_upscaled(&client_id.to_string(), x, 20., 16., WHITE);
         let text = if client_info.ready {
             "ready"
         } else {
             "waiting"
         };
         if client_id == id {
-            response = draw_button(Rect::new(x, 70., 120., 40.), &text);
+            response = draw_button(Rect::new(x + 5., 70., 60., 20.), &text);
         } else {
-            draw_text(&text, x, 62., 32., WHITE);
+            draw_text_upscaled(&text, x + 5., 68., 16., WHITE);
         }
     }
     response
+}
+
+pub fn draw_score(players_score: UniqueView<PlayersScore>) {
+    let mut offset_x = 0.;
+    for (client_id, score) in players_score.score.iter() {
+        let text = format!("{}: {}", client_id, score);
+        draw_rectangle_lines_upscaled(10. + offset_x, 10., 70., 16., 2., WHITE);
+        draw_text_upscaled(&text, 14. + offset_x, 10., 10., WHITE);
+        offset_x += 80.;
+    }
 }

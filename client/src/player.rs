@@ -8,13 +8,13 @@ use shared::{
 use shipyard::*;
 use std::collections::HashMap;
 
-use crate::animation::{AnimationTexture, TextureAnimation};
+use crate::{UPSCALE, animation::{AnimationTexture, TextureAnimation}};
 use crate::ui::mouse_to_screen;
 use crate::ClientInfo;
 
 pub fn draw_players(
     player_texture: UniqueView<AnimationTexture>,
-    // textures: UniqueView<HashMap<&str, Texture2D>>,
+    textures: UniqueView<HashMap<&str, Texture2D>>,
     players: View<Player>,
     transforms: View<Transform>,
     health: View<Health>,
@@ -35,10 +35,11 @@ pub fn draw_players(
         let center_x = x + (texture_animation.width as f32 / 2.0);
         let center_y = y + 4.0 + (texture_animation.height as f32 / 2.0);
 
-        let wand_size = 12.0;
-        let wand_x = center_x + player.direction.x * wand_size;
-        let wand_y = center_y + player.direction.y * wand_size;
+        // let wand_size = 12.0;
+        // let wand_x = center_x + player.direction.x * wand_size;
+        // let wand_y = center_y + player.direction.y * wand_size;
         
+        /*
         draw_line(center_x, center_y, wand_x, wand_y, 3.0, YELLOW);
         if player.fireball_charge > 0. {
             draw_circle(wand_x, wand_y, 3.0 + player.fireball_charge * 4., RED);
@@ -47,15 +48,15 @@ pub fn draw_players(
         } else {
             draw_circle(wand_x, wand_y, 3.0, BLACK);
         }
-        /*
+        */
         let wand_texture = textures.get("wand").unwrap();
         let wand_params = DrawTextureParams {
-            dest_size: Some(vec2(16., 16.)),
-            rotation: player.direction.angle_between(Vec2::unit_x()),
+            dest_size: Some(vec2(16. * UPSCALE, 16. * UPSCALE)),
+            pivot: Some(vec2(center_x * UPSCALE, center_y * UPSCALE)),
+            rotation: -player.direction.angle_between(Vec2::unit_x()),
             ..Default::default()
         };
-        draw_texture_ex(*wand_texture, center_x * 30., center_y * 30., WHITE, wand_params);
-        */
+        draw_texture_ex(*wand_texture, (center_x - 6.) * UPSCALE, (center_y - 12.) * UPSCALE, WHITE, wand_params);
 
         // Draw Player Health
         let current_life_percent = (player_health.current as f32) / (player_health.max as f32);
@@ -63,8 +64,8 @@ pub fn draw_players(
         let bar_width = current_life_percent * max_bar_width;
         let health_x = x - 5.;
         let health_y = y - 5.;
-        draw_rectangle(health_x, health_y, max_bar_width, 5., RED);
-        draw_rectangle(health_x, health_y, bar_width, 5., GREEN);
+        draw_rectangle(health_x * UPSCALE, health_y * UPSCALE, max_bar_width * UPSCALE, 5. * UPSCALE, RED);
+        draw_rectangle(health_x * UPSCALE, health_y * UPSCALE, bar_width * UPSCALE, 5. * UPSCALE, GREEN);
     }
 }
 
@@ -79,7 +80,7 @@ pub fn player_input(
     let entity_id = client_info.entity_id.unwrap();
     let transform = transforms.get(entity_id).unwrap();
 
-    let direction = (mouse_to_screen() - transform.position).normalize();
+    let direction = (mouse_to_screen() - (transform.position + vec2(16., 24.))).normalize();
 
     let up = is_key_down(KeyCode::W) || is_key_down(KeyCode::Up);
     let down = is_key_down(KeyCode::S) || is_key_down(KeyCode::Down);
