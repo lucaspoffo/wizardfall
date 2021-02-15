@@ -1,12 +1,12 @@
 use macroquad::prelude::*;
 use shared::{
-    animation::AnimationController,
+    animation::{AnimationController, AnimationEntity},
     channels,
     ldtk::{load_level_collisions, PlayerRespawnPoints},
     message::{ClientAction, ServerMessages},
     network::ServerFrame,
     physics::{render_physics, Physics},
-    player::{Player, PlayerAnimation, PlayerInput},
+    player::{Player, PlayerInput},
     projectile::{Projectile, ProjectileType},
     timer::Timer,
     ClientInfo, Health, LobbyInfo, PlayersScore, Transform,
@@ -343,10 +343,10 @@ fn cast_fireball_player(
                 player.fireball_charge = 0.;
                 return;
             }
-            let pos = transform.position + vec2(8., 16.);
+            let pos = transform.position + vec2(4., 6.);
 
             let entity_id = entities.add_entity((), ());
-            physics.add_actor(entity_id, pos, 16, 16);
+            physics.add_actor(entity_id, pos, 4, 4);
 
             let speed = input.direction * (200. * (1. + player.fireball_charge * 3.));
             let projectile = Projectile::new(ProjectileType::Fireball, speed, player_id);
@@ -431,9 +431,9 @@ fn update_players(
 
         // Update animation
         if input.right ^ input.left || input.down ^ input.up || !on_ground {
-            animation.change_animation(PlayerAnimation::Run.into());
+            animation.play_animation("run");
         } else {
-            animation.change_animation(PlayerAnimation::Idle.into());
+            animation.play_animation("idle");
         }
     }
 }
@@ -460,13 +460,13 @@ fn create_player(
     let mut player_position =
         player_respawn_points.0[rand::rand() as usize % player_respawn_points.0.len()];
 
-    player_position.y -= 48.;
+    player_position.y -= 16.;
 
-    physics.add_actor(entity_id, player_position, 32, 48);
+    physics.add_actor(entity_id, player_position, 8, 12);
 
     let player = Player::new(client_id);
     let transform = Transform::default();
-    let animation = PlayerAnimation::Idle.get_animation_controller();
+    let animation = AnimationEntity::Player.new_animation_controller();
 
     let player_health = Health::new(50);
 

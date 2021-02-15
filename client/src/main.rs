@@ -24,10 +24,11 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use level::{draw_level, load_project_and_assets};
 
 mod animation;
+mod level;
 mod player;
 mod ui;
-mod level;
 
+use crate::animation::{AnimationTextures, Textures};
 use crate::player::{draw_players, load_player_texture, player_input, track_client_entity};
 
 #[macroquad::main("Renet macroquad demo")]
@@ -42,10 +43,6 @@ async fn main() {
 
     let id = rand::rand() as u64;
     let mut app = App::new(id);
-
-    let mapping: EntityMapping = HashMap::new();
-    app.world.add_unique(mapping).unwrap();
-    app.world.add_unique(PlayersScore::default()).unwrap();
 
     load_player_texture(&mut app.world).await;
     load_project_and_assets(&app.world).await;
@@ -106,9 +103,14 @@ impl App {
             client_id: id,
             entity_id: None,
         };
+
         world.add_unique(client_info).unwrap();
-        let textures: HashMap<String, Texture2D> = HashMap::new();
-        world.add_unique(textures).unwrap();
+        world.add_unique(AnimationTextures(HashMap::new())).unwrap();
+        world.add_unique(Textures(HashMap::new())).unwrap();
+
+        let mapping: EntityMapping = HashMap::new();
+        world.add_unique(mapping).unwrap();
+        world.add_unique(PlayersScore::default()).unwrap();
 
         // Tracking of components
         world.borrow::<ViewMut<Player>>().unwrap().track_all();
@@ -270,7 +272,13 @@ impl App {
 
 fn draw_projectiles(projectiles: View<Projectile>, transform: View<Transform>) {
     for (_, transform) in (&projectiles, &transform).iter() {
-        draw_rectangle(transform.position.x * UPSCALE, transform.position.y * UPSCALE, 16.0 * UPSCALE, 16.0 * UPSCALE, RED);
+        draw_rectangle(
+            transform.position.x * UPSCALE,
+            transform.position.y * UPSCALE,
+            4.0 * UPSCALE,
+            4.0 * UPSCALE,
+            RED,
+        );
     }
 }
 

@@ -4,6 +4,7 @@ use shared::ldtk::{load_project, BASE_DIR};
 use shipyard::{UniqueView, UniqueViewMut, World};
 use std::collections::HashMap;
 
+use crate::animation::Textures;
 use crate::UPSCALE;
 
 #[derive(Debug)]
@@ -96,14 +97,14 @@ pub async fn load_project_and_assets(world: &World) {
     }
 
     let mut textures = world
-        .borrow::<UniqueViewMut<HashMap<String, Texture2D>>>()
+        .borrow::<UniqueViewMut<Textures>>()
         .unwrap();
     for level in project.levels.iter() {
         if let Some(bg_rel_path) = level.bg_rel_path.as_ref() {
-            if !textures.contains_key(bg_rel_path) {
+            if !textures.0.contains_key(bg_rel_path) {
                 let texture_path = format!("{}{}", BASE_DIR, &bg_rel_path[..]);
                 let bg_texture = load_texture(&texture_path).await;
-                textures.insert(bg_rel_path.clone(), bg_texture);
+                textures.0.insert(bg_rel_path.clone(), bg_texture);
             }
         }
     }
@@ -115,11 +116,11 @@ pub async fn load_project_and_assets(world: &World) {
 pub fn draw_level(
     project: UniqueView<Project>,
     sprite_sheets: UniqueView<SpriteSheets>,
-    textures: UniqueView<HashMap<String, Texture2D>>,
+    textures: UniqueView<Textures>,
 ) {
     // Draw background
     if let Some(bg_path) = project.levels[0].bg_rel_path.as_ref() {
-        if let Some(bg_texture) = textures.get(bg_path) {
+        if let Some(bg_texture) = textures.0.get(bg_path) {
             let dest_size = vec2(bg_texture.width(), bg_texture.height());
             let dest_size = Some(dest_size * UPSCALE);
 

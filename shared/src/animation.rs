@@ -1,28 +1,53 @@
-use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 
-use crate::player::PlayerAnimation;
 use crate::network::NetworkState;
 
-#[derive(Debug, Clone)]
-pub struct AnimationController {
-    pub animation: Animation,
-    pub frame: u8,
+#[derive(Clone, Debug)]
+pub struct Animation {
+    pub name: String,
+    pub row: u32,
+    pub frames: u32,
     speed: Duration,
-    last_updated: Instant,
-    total_frames: u8,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Animation {
-    PlayerAnimation(PlayerAnimation),
 }
 
 impl Animation {
-    pub fn get_animation_controller(&self) -> AnimationController {
+    pub fn new(name: String, row: u32, frames: u32, fps: u64) -> Self {
+        let speed = Duration::from_millis(1000 / fps);
+
+        Self {
+            name,
+            row,
+            frames,
+            speed,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AnimationController {
+    pub animation_entity: AnimationEntity,
+    pub animations: Vec<Animation>,
+    pub frame: u32,
+    pub current_animation: usize,
+    last_updated: Instant,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum AnimationEntity {
+    Player,
+}
+
+impl AnimationEntity {
+    pub fn new_animation_controller(self) -> AnimationController {
         match self {
-            Animation::PlayerAnimation(player_animation) => {
-                player_animation.get_animation_controller()
+            AnimationEntity::Player => {
+                let mut animation_controller = AnimationController::new(self);
+                let idle = Animation::new("idle".to_string(), 0, 2, 13);
+                let run = Animation::new("run".to_string(), 0, 2, 13);
+                animation_controller.add_animation(idle);
+                animation_controller.add_animation(run);
+                animation_controller
             }
         }
     }
@@ -30,61 +55,71 @@ impl Animation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnimationState {
+    pub animation_entity: AnimationEntity,
     pub frame: u8,
-    pub current_animation: Animation,
+    pub current_animation: u8,
 }
 
 impl NetworkState for AnimationController {
     type State = AnimationState;
 
     fn from_state(state: Self::State) -> Self {
-        let mut animation_controller = state.current_animation.get_animation_controller();
-        animation_controller.frame = state.frame;
+        let mut animation_controller = state.animation_entity.new_animation_controller();
+        animation_controller.frame = state.frame as u32;
         animation_controller
     }
 
     fn update_from_state(&mut self, state: Self::State) {
-        self.change_animation(state.current_animation);
-        self.frame = state.frame;
+        self.change_animation(state.current_animation as usize);
+        self.frame = state.frame as u32;
     }
 
     fn state(&self) -> AnimationState {
         AnimationState {
-            current_animation: self.animation.clone(),
-            frame: self.frame,
+            animation_entity: self.animation_entity,
+            current_animation: self.current_animation as u8,
+            frame: self.frame as u8,
         }
     }
 }
 
 impl AnimationController {
-    pub fn new(fps: u64, total_frames: u8, animation: Animation) -> Self {
-        let speed = Duration::from_millis(1000 / fps);
+    pub fn new(animation_entity: AnimationEntity) -> Self {
         Self {
-            animation,
-            speed,
-            total_frames,
+            animation_entity,
+            animations: vec![],
+            current_animation: 0,
             frame: 0,
             last_updated: Instant::now(),
         }
     }
 
-    pub fn change_animation(&mut self, animation: Animation) {
-        if self.animation == animation {
+    pub fn add_animation(&mut self, animation: Animation) {
+        self.animations.push(animation);
+    }
+
+    pub fn play_animation(&mut self, animation: &str) {
+        if let Some(animation) = self.animations.iter().position(|a| a.name == animation) {
+            self.change_animation(animation);
+        }
+    }
+
+    pub fn change_animation(&mut self, animation: usize) {
+        if self.current_animation == animation || animation > self.animations.len() {
             return;
         }
-        let animation_controller = animation.get_animation_controller();
-        self.animation = animation_controller.animation;
+
+        self.current_animation = animation;
         self.frame = 0;
-        self.speed = animation_controller.speed;
         self.last_updated = Instant::now();
-        self.total_frames = animation_controller.total_frames;
     }
 
     pub fn update(&mut self) {
+        let animation = &self.animations[self.current_animation];
         let current_time = Instant::now();
-        if current_time - self.last_updated > self.speed {
+        if current_time - self.last_updated > animation.speed {
             self.frame += 1;
-            self.frame %= self.total_frames;
+            self.frame %= animation.frames;
             self.last_updated = current_time;
         }
     }

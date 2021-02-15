@@ -1,41 +1,33 @@
 use macroquad::prelude::*;
-use shared::animation::{Animation, AnimationController};
+use shared::animation::AnimationController;
 use std::collections::HashMap;
 
 use crate::UPSCALE;
 
-pub type AnimationTexture = HashMap<Animation, TextureAnimation>;
+pub struct AnimationTextures(pub HashMap<String, TextureAnimation>);
+pub struct Textures(pub HashMap<String, Texture2D>);
 
 pub struct TextureAnimation {
     pub texture: Texture2D,
     pub width: u32,
     pub height: u32,
-    pub h_frames: u8,
-    pub v_frames: u8,
+    pub offset: Vec2,
 }
 
 impl TextureAnimation {
-    pub fn new(texture: Texture2D, width: u32, height: u32, h_frames: u8, v_frames: u8) -> Self {
+    pub fn new(texture: Texture2D, width: u32, height: u32, offset: Vec2) -> Self {
         Self {
             texture,
             width,
             height,
-            h_frames,
-            v_frames,
+            offset,
         }
     }
 
     pub fn draw(&self, x: f32, y: f32, flip_x: bool, animation_controller: &AnimationController) {
-        if animation_controller.frame > self.h_frames * self.v_frames {
-            println!(
-                "Invalid animation frame {} for texture player",
-                animation_controller.frame
-            );
-            return;
-        }
-
-        let texture_x = (animation_controller.frame % self.h_frames) as u32 * self.width;
-        let texture_y = (animation_controller.frame / self.h_frames) as u32 * self.height;
+        let animation = &animation_controller.animations[animation_controller.current_animation];
+        let texture_x = animation_controller.frame * self.width;
+        let texture_y = animation.row * self.height;
         let draw_rect = Rect::new(
             texture_x as f32,
             texture_y as f32,
@@ -48,14 +40,23 @@ impl TextureAnimation {
         if flip_x {
             x_size *= -1.0;
             draw_x += self.width as f32;
+            draw_x -= self.width as f32 / 2. + self.offset.x;
+        } else {
+            draw_x += self.offset.x;
         }
-        
+
         let params = DrawTextureParams {
             source: Some(draw_rect),
             dest_size: Some(vec2(x_size * UPSCALE, self.height as f32 * UPSCALE)),
             ..Default::default()
         };
 
-        draw_texture_ex(self.texture, draw_x * UPSCALE, y * UPSCALE, WHITE, params);
+        draw_texture_ex(
+            self.texture,
+            draw_x * UPSCALE,
+            (y + self.offset.y) * UPSCALE,
+            WHITE,
+            params,
+        );
     }
 }

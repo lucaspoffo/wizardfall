@@ -1,8 +1,6 @@
-use ldtk_rust::{Project, TileInstance};
+use ldtk_rust::Project;
 use macroquad::prelude::*;
-use shipyard::{UniqueView, World};
-
-use std::collections::HashMap;
+use shipyard::World;
 
 use crate::physics::Physics;
 
