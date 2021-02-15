@@ -14,7 +14,7 @@ use crate::ClientInfo;
 
 pub fn draw_players(
     player_texture: UniqueView<AnimationTexture>,
-    textures: UniqueView<HashMap<&str, Texture2D>>,
+    textures: UniqueView<HashMap<String, Texture2D>>,
     players: View<Player>,
     transforms: View<Transform>,
     health: View<Health>,
@@ -131,11 +131,9 @@ pub async fn load_player_texture(world: &mut World) {
 
     animations.insert(PlayerAnimation::Idle.into(), idle_animation);
     animations.insert(PlayerAnimation::Run.into(), run_animation);
-    let mut textures = HashMap::new();
     let texture = load_texture("Arm.png").await;
     set_texture_filter(texture, FilterMode::Nearest);
-    textures.insert("wand", texture);
+    world.borrow::<UniqueViewMut<HashMap<String, Texture2D>>>().unwrap().insert("wand".to_string(), texture);
 
-    world.add_unique(textures).unwrap();
     world.add_unique(animations).unwrap();
 }

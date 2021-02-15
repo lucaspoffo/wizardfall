@@ -1,7 +1,7 @@
 use ldtk_rust::{Project, TileInstance};
 use macroquad::prelude::*;
 use shared::ldtk::{load_project, BASE_DIR};
-use shipyard::{UniqueView, World};
+use shipyard::{UniqueView, UniqueViewMut, World};
 use std::collections::HashMap;
 
 use crate::UPSCALE;
@@ -63,7 +63,13 @@ impl TextureAtlas {
             ..Default::default()
         };
 
-        draw_texture_ex(self.texture, draw_pos.x * UPSCALE, draw_pos.y * UPSCALE, WHITE, params)
+        draw_texture_ex(
+            self.texture,
+            draw_pos.x * UPSCALE,
+            draw_pos.y * UPSCALE,
+            WHITE,
+            params,
+        )
     }
 }
 
@@ -89,11 +95,42 @@ pub async fn load_project_and_assets(world: &World) {
         sprite_sheets.0.insert(tileset.uid, texture_atlas);
     }
 
+    let mut textures = world
+        .borrow::<UniqueViewMut<HashMap<String, Texture2D>>>()
+        .unwrap();
+    for level in project.levels.iter() {
+        if let Some(bg_rel_path) = level.bg_rel_path.as_ref() {
+            if !textures.contains_key(bg_rel_path) {
+                let texture_path = format!("{}{}", BASE_DIR, &bg_rel_path[..]);
+                let bg_texture = load_texture(&texture_path).await;
+                textures.insert(bg_rel_path.clone(), bg_texture);
+            }
+        }
+    }
+
     world.add_unique(project).unwrap();
     world.add_unique(sprite_sheets).unwrap();
 }
 
-pub fn draw_level(project: UniqueView<Project>, sprite_sheets: UniqueView<SpriteSheets>) {
+pub fn draw_level(
+    project: UniqueView<Project>,
+    sprite_sheets: UniqueView<SpriteSheets>,
+    textures: UniqueView<HashMap<String, Texture2D>>,
+) {
+    // Draw background
+    if let Some(bg_path) = project.levels[0].bg_rel_path.as_ref() {
+        if let Some(bg_texture) = textures.get(bg_path) {
+            let dest_size = vec2(bg_texture.width(), bg_texture.height());
+            let dest_size = Some(dest_size * UPSCALE);
+
+            let params: DrawTextureParams = DrawTextureParams {
+                dest_size,
+                ..Default::default()
+            };
+            draw_texture_ex(*bg_texture, 0., 0., WHITE, params);
+        }
+    }
+
     for (_, layer) in project.levels[0]
         .layer_instances
         .as_ref()

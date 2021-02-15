@@ -107,6 +107,8 @@ impl App {
             entity_id: None,
         };
         world.add_unique(client_info).unwrap();
+        let textures: HashMap<String, Texture2D> = HashMap::new();
+        world.add_unique(textures).unwrap();
 
         // Tracking of components
         world.borrow::<ViewMut<Player>>().unwrap().track_all();
