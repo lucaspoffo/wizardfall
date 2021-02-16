@@ -84,6 +84,7 @@ dependencies = [
  "log",
  "macroquad",
  "renet",
+ "server",
  "shared",
  "shipyard",
 ]
@@ -521,6 +522,7 @@ dependencies = [
  "alto_logger",
  "bincode",
  "byteorder",
+ "crossbeam-channel",
  "dyn-clone",
  "log",
  "serde",

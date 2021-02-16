@@ -10,16 +10,17 @@ use shared::{
 
 use alto_logger::TermLogger;
 use renet::{
-    client::{ClientConnected, RequestConnection},
+    client::{Client, ClientConnected, RequestConnection},
     endpoint::EndpointConfig,
     protocol::unsecure::UnsecureClientProtocol,
 };
 use shipyard::*;
 use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, draw_score, UiState};
 
-use std::collections::HashMap;
 use std::net::UdpSocket;
+use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, env::args};
 
 use level::{draw_level, load_project_and_assets};
 
@@ -30,6 +31,8 @@ mod ui;
 
 use crate::animation::{AnimationTextures, Textures};
 use crate::player::{draw_players, load_player_texture, player_input, track_client_entity};
+
+use server::Game;
 
 #[macroquad::main("Renet macroquad demo")]
 async fn main() {
@@ -74,10 +77,11 @@ struct App {
     world: World,
     camera: Camera2D,
     render_target: RenderTarget,
-    connection: Option<ClientConnected>,
+    connection: Option<Box<dyn Client>>,
     request_connection: Option<RequestConnection>,
     lobby_info: LobbyInfo,
     ui: UiState,
+    server: Option<Game>,
 }
 
 pub struct ClientInfo {
@@ -115,22 +119,41 @@ impl App {
         // Tracking of components
         world.borrow::<ViewMut<Player>>().unwrap().track_all();
 
+        let mut args = std::env::args();
+        args.next();
+
+
+        let mut server = None;
+        let mut connection: Option<Box<dyn Client>> = None;
+        let mut screen = Screen::Connect;
+        if args.next().is_some() {
+            let mut s = Game::new("127.0.0.1:5000".parse().unwrap()).unwrap();
+            connection = Some(Box::new(s.get_host_client(id)));
+            screen = Screen::Lobby;
+            server = Some(s);
+        }
+
         Self {
             render_target,
             id,
             ui: UiState::default(),
             world,
             camera,
-            screen: Screen::Connect,
+            screen,
             request_connection: None,
             lobby_info: LobbyInfo::default(),
-            connection: None,
+            connection,
+            server,
         }
     }
 
     async fn update(&mut self) {
         set_camera(self.camera);
         clear_background(BLACK);
+
+        if let Some(server) = self.server.as_mut() {
+            server.update();
+        }
 
         if let Some(connection) = self.connection.as_mut() {
             if let Err(e) = connection.process_events(Instant::now()) {
@@ -183,7 +206,7 @@ impl App {
                 draw_connection_screen(&mut self.ui);
                 match self.request_connection.as_mut().unwrap().update() {
                     Ok(Some(connection)) => {
-                        self.connection = Some(connection);
+                        self.connection = Some(Box::new(connection));
                         self.request_connection = None;
                         self.screen = Screen::Lobby;
                         self.ui.connect_error = None;
