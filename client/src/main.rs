@@ -3,6 +3,7 @@ use shared::{
     channels,
     message::{ClientAction, ServerMessages},
     network::ServerFrame,
+    physics::render_physics,
     player::Player,
     projectile::Projectile,
     EntityMapping, LobbyInfo, PlayersScore, Transform,
@@ -10,17 +11,16 @@ use shared::{
 
 use alto_logger::TermLogger;
 use renet::{
-    client::{Client, ClientConnected, RequestConnection},
+    client::{Client, RequestConnection},
     endpoint::EndpointConfig,
     protocol::unsecure::UnsecureClientProtocol,
 };
 use shipyard::*;
 use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, draw_score, UiState};
 
+use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use std::{collections::HashMap, env::args};
 
 use level::{draw_level, load_project_and_assets};
 
@@ -121,7 +121,6 @@ impl App {
 
         let mut args = std::env::args();
         args.next();
-
 
         let mut server = None;
         let mut connection: Option<Box<dyn Client>> = None;
@@ -290,6 +289,11 @@ impl App {
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
         self.world.run(draw_score).unwrap();
+        
+        // Debug server physics when host
+        if let Some(server) = self.server.as_ref() {
+            server.world.run_with_data(render_physics, UPSCALE).unwrap();
+        }
     }
 }
 

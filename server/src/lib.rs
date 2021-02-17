@@ -12,7 +12,13 @@ use shared::{
 };
 
 use bincode::{deserialize, serialize};
-use renet::{client::HostClient, endpoint::EndpointConfig, error::RenetError, protocol::unsecure::UnsecureServerProtocol, server::{Server, ServerConfig, ServerEvent}};
+use renet::{
+    client::HostClient,
+    endpoint::EndpointConfig,
+    error::RenetError,
+    protocol::unsecure::UnsecureServerProtocol,
+    server::{Server, ServerConfig, ServerEvent},
+};
 
 use glam::{vec2, Vec2};
 use shipyard::*;
@@ -28,8 +34,8 @@ enum Scene {
 }
 
 pub struct Game {
+    pub world: World,
     scene: Scene,
-    world: World,
     server: Server<UnsecureServerProtocol>,
     lobby_info: LobbyInfo,
     lobby_updated: bool,
@@ -38,6 +44,31 @@ pub struct Game {
 struct GameplayInfo {
     respawn_players: bool,
     respawn_players_timer: Timer,
+}
+
+#[derive(Debug)]
+pub struct GameplayConfig {
+    pub dash_speed: f32,
+    pub jump_speed: f32,
+    pub walk_speed: f32,
+    pub player_gravity: f32,
+    pub dash_duration: f32,
+    pub dash_cooldown: f32,
+    pub fireball_cooldown: f32,
+}
+
+impl Default for GameplayConfig {
+    fn default() -> Self {
+        Self {
+            dash_speed: 160.,
+            jump_speed: 180.,
+            walk_speed: 80.,
+            player_gravity: 550.,
+            dash_duration: 0.,
+            dash_cooldown: 0.,
+            fireball_cooldown: 0.,
+        }
+    }
 }
 
 type PlayerMapping = HashMap<u64, EntityId>;
@@ -64,6 +95,7 @@ impl Game {
         world.add_unique(server_info).unwrap();
         world.add_unique(PlayerMapping::new()).unwrap();
         world.add_unique(PlayersScore::default()).unwrap();
+        world.add_unique(GameplayConfig::default()).unwrap();
 
         world.borrow::<ViewMut<Player>>().unwrap().track_deletion();
         world
@@ -185,16 +217,14 @@ impl Game {
             })
             .unwrap();
 
-        if should_check_win {
-            if self.world.run(check_win_condition).unwrap() {
-                self.world.run(cleanup_world).unwrap();
-                self.world
-                    .run(|mut info: UniqueViewMut<GameplayInfo>| {
-                        info.respawn_players_timer.reset();
-                        info.respawn_players = true;
-                    })
-                    .unwrap();
-            }
+        if should_check_win && self.world.run(check_win_condition).unwrap() {
+            self.world.run(cleanup_world).unwrap();
+            self.world
+                .run(|mut info: UniqueViewMut<GameplayInfo>| {
+                    info.respawn_players_timer.reset();
+                    info.respawn_players = true;
+                })
+                .unwrap();
         }
 
         let respawn = self
@@ -224,26 +254,6 @@ impl Game {
             }
         }
     }
-
-    /*
-    fn debug_physics(&self) {
-        let viewport_height = 640.0;
-        let aspect = screen_width() / screen_height();
-        let viewport_width = viewport_height * aspect;
-
-        let camera = Camera2D {
-            zoom: vec2(
-                1.0 / viewport_width as f32 * 2.,
-                -1.0 / viewport_height as f32 * 2.,
-            ),
-            target: vec2(viewport_width / 2., viewport_height / 2.),
-            ..Default::default()
-        };
-        clear_background(BLACK);
-        set_camera(camera);
-        self.world.run(render_physics).unwrap();
-    }
-    */
 
     fn handle_client_action(&mut self, action: ClientAction, client_id: &u64) {
         match action {
@@ -361,6 +371,7 @@ fn update_players(
     inputs: View<PlayerInput>,
     mut animations: ViewMut<AnimationController>,
     mut physics: UniqueViewMut<Physics>,
+    gameplay: UniqueView<GameplayConfig>,
 ) {
     for (entity_id, (mut player, input, mut animation)) in
         (&mut players, &inputs, &mut animations).iter().with_id()
@@ -384,7 +395,7 @@ fn update_players(
             } else {
                 vec2(input.direction.x.signum(), 0.)
             };
-            player.speed = dash_direction * 300.;
+            player.speed = dash_direction * gameplay.dash_speed;
         }
 
         let pos = physics.actor_pos(entity_id);
@@ -393,18 +404,18 @@ fn update_players(
         if player.current_dash_duration > 0.0 {
             player.current_dash_duration -= get_frame_time();
             if player.current_dash_duration <= 0.0 {
-                player.speed = player.speed.normalize() * 100.;
+                player.speed = player.speed.normalize() * gameplay.walk_speed;
             }
         } else {
             if !on_ground {
-                player.speed.y += 1000. * get_frame_time();
+                player.speed.y += gameplay.player_gravity * get_frame_time();
             } else {
-                player.speed.y = 500. * get_frame_time();
+                player.speed.y = gameplay.player_gravity * get_frame_time();
             }
 
-            player.speed.x = movement_direction.x * 100.;
+            player.speed.x = movement_direction.x * gameplay.walk_speed;
             if input.jump && on_ground {
-                player.speed.y = -360.;
+                player.speed.y = -gameplay.jump_speed;
             }
         }
 

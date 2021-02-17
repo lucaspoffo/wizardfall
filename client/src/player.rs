@@ -105,7 +105,7 @@ pub fn player_input(
     let left = is_key_down(KeyCode::A) || is_key_down(KeyCode::Left);
     let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
 
-    let jump = is_key_pressed(KeyCode::Space);
+    let jump = is_key_down(KeyCode::Space);
     let dash = is_key_pressed(KeyCode::LeftShift);
     let fire = is_mouse_button_down(MouseButton::Left);
     PlayerInput {

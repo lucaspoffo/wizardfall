@@ -15,4 +15,4 @@ alto_logger = "0.3.6"
 glam = { version = "0.10", features = [ "serde" ] }
 shipyard = { git = "https://github.com/leudz/shipyard.git", version = "0.4.1", features = [ "serde1" ] }
 # TODO: remove this and use only miniquad as an debug feature.
-macroquad = { version = "=0.3.0-alpha.14", features = [ "log-impl" ] }
+eframe = "0.9.0"

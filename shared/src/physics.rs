@@ -369,7 +369,7 @@ impl Physics {
     }
 }
 
-pub fn render_physics(world: UniqueView<Physics>) {
+pub fn render_physics(upscale: f32, world: UniqueView<Physics>) {
     // Draw Static Layer
     for layer in world.static_tiled_layers.iter() {
         for (i, &collider) in layer.static_colliders.iter().enumerate() {
@@ -377,11 +377,11 @@ pub fn render_physics(world: UniqueView<Physics>) {
                 let x = (i % layer.width) as f32 * layer.tile_width;
                 let y = (i / layer.width) as f32 * layer.tile_height;
                 draw_rectangle_lines(
-                    x,
-                    y,
-                    layer.tile_width,
-                    layer.tile_height,
-                    1.0,
+                    x * upscale,
+                    y * upscale,
+                    layer.tile_width * upscale,
+                    layer.tile_height * upscale,
+                    1.0 * upscale,
                     layer.debug_color,
                 )
             }
