@@ -98,7 +98,7 @@ pub fn player_input(
     let entity_id = client_info.entity_id.unwrap();
     let transform = transforms.get(entity_id).unwrap();
 
-    let direction = (mouse_to_screen() - (transform.position + vec2(16., 24.))).normalize();
+    let direction = (mouse_to_screen() - (transform.position + vec2(6., 8.))).normalize();
 
     let up = is_key_down(KeyCode::W) || is_key_down(KeyCode::Up);
     let down = is_key_down(KeyCode::S) || is_key_down(KeyCode::Down);

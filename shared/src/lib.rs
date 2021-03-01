@@ -23,23 +23,39 @@ pub mod math;
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;
 
-pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub enum Channels {
+    Reliable = 1,
+    ReliableCritical = 2,
+    Unreliable = 3,
+}
+
+impl Into<u8> for Channels {
+    fn into(self) -> u8 {
+        self as u8
+    }   
+}
+
+pub fn channels() -> HashMap<Channels, Box<dyn ChannelConfig>> {
     let reliable_config = ReliableOrderedChannelConfig {
         message_resend_time: Duration::from_millis(100),
         ..Default::default()
     };
 
-    let player_action_channel = ReliableOrderedChannelConfig {
+    // We resend every message every frame until acked
+    // This is very consuming, but since we will be using for PlayerInput
+    // There is really not a problem.
+    let reliable_critical_channel = ReliableOrderedChannelConfig {
         message_resend_time: Duration::from_millis(0),
         ..Default::default()
     };
 
     let unreliable_config = UnreliableUnorderedChannelConfig::default();
 
-    let mut channels_config: HashMap<u8, Box<dyn ChannelConfig>> = HashMap::new();
-    channels_config.insert(0, Box::new(reliable_config));
-    channels_config.insert(1, Box::new(unreliable_config));
-    channels_config.insert(2, Box::new(player_action_channel));
+    let mut channels_config: HashMap<Channels, Box<dyn ChannelConfig>> = HashMap::new();
+    channels_config.insert(Channels::Reliable, Box::new(reliable_config));
+    channels_config.insert(Channels::Unreliable, Box::new(unreliable_config));
+    channels_config.insert(Channels::ReliableCritical, Box::new(reliable_critical_channel));
     channels_config
 }
 

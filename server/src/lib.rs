@@ -8,7 +8,7 @@ use shared::{
     player::{Player, PlayerInput},
     projectile::{Projectile, ProjectileType},
     timer::Timer,
-    ClientInfo, Health, LobbyInfo, PlayersScore, Transform,
+    Channels, ClientInfo, Health, LobbyInfo, PlayersScore, Transform,
 };
 
 use bincode::{deserialize, serialize};
@@ -26,7 +26,7 @@ use shipyard::*;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::net::UdpSocket;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 enum Scene {
     Lobby,
@@ -36,7 +36,7 @@ enum Scene {
 pub struct Game {
     pub world: World,
     scene: Scene,
-    server: Server<UnsecureServerProtocol>,
+    server: Server<UnsecureServerProtocol, Channels>,
     lobby_info: LobbyInfo,
     lobby_updated: bool,
 }
@@ -79,12 +79,10 @@ impl Game {
         let server_config = ServerConfig::default();
         let endpoint_config = EndpointConfig::default();
 
-        let server: Server<UnsecureServerProtocol> =
+        let server: Server<UnsecureServerProtocol, Channels> =
             Server::new(socket, server_config, endpoint_config, channels())?;
 
         let mut world = World::new();
-
-        // Initialize entity world.
         load_level_collisions(&mut world);
 
         let server_info = GameplayInfo {
@@ -112,14 +110,18 @@ impl Game {
         })
     }
 
-    pub fn get_host_client(&mut self, client_id: u64) -> HostClient {
+    pub fn get_host_client(&mut self, client_id: u64) -> HostClient<Channels> {
         self.server.create_host_client(client_id)
     }
 
     pub fn update(&mut self) {
         self.lobby_updated = false;
-        self.server.update(Instant::now());
-        for (client_id, messages) in self.server.get_messages_from_channel(0).iter() {
+        self.server.update();
+        for (client_id, messages) in self
+            .server
+            .get_messages_from_channel(Channels::ReliableCritical)
+            .iter()
+        {
             for message in messages.iter() {
                 let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
                 self.world
@@ -135,7 +137,11 @@ impl Game {
             }
         }
 
-        for (client_id, messages) in self.server.get_messages_from_channel(2).iter() {
+        for (client_id, messages) in self
+            .server
+            .get_messages_from_channel(Channels::Reliable)
+            .iter()
+        {
             for message in messages.iter() {
                 let player_action: ClientAction = deserialize(message).unwrap();
                 self.handle_client_action(player_action, client_id);
@@ -178,12 +184,14 @@ impl Game {
                     self.scene = Scene::Gameplay;
                     let start_gameplay = ServerMessages::StartGameplay;
                     let start_gameplay = serialize(&start_gameplay).unwrap().into_boxed_slice();
-                    self.server.send_message_to_all_clients(2, start_gameplay);
+                    self.server
+                        .send_message_to_all_clients(Channels::Reliable, start_gameplay);
                 }
                 if self.lobby_updated {
                     let lobby_update = ServerMessages::UpdateLobby(self.lobby_info.clone());
                     let lobby_update = serialize(&lobby_update).unwrap().into_boxed_slice();
-                    self.server.send_message_to_all_clients(2, lobby_update);
+                    self.server
+                        .send_message_to_all_clients(Channels::Reliable, lobby_update);
                 }
             }
             Scene::Gameplay => {
@@ -202,8 +210,6 @@ impl Game {
         self.world.run(update_projectiles).unwrap();
         self.world.run(cast_fireball_player).unwrap();
         self.world.run(sync_physics).unwrap();
-
-        // self.debug_physics();
 
         // Clear dead entities
         self.world.run(remove_zero_health).unwrap();
@@ -239,17 +245,17 @@ impl Game {
 
         let server_frame = ServerFrame::from_world(&self.world);
         let server_frame = serialize(&server_frame).unwrap().into_boxed_slice();
-
-        self.server.send_message_to_all_clients(1, server_frame);
+        self.server
+            .send_message_to_all_clients(Channels::Unreliable, server_frame);
 
         // Send score update to clients
         {
             let mut score = self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
             if score.updated {
                 let score_message = ServerMessages::UpdateScore((*score).clone());
-                let score_message = serialize(&score_message).expect("Failed to serialize score");
+                let score_message = serialize(&score_message).unwrap().into_boxed_slice();
                 self.server
-                    .send_message_to_all_clients(2, score_message.into_boxed_slice());
+                    .send_message_to_all_clients(Channels::Unreliable, score_message);
                 score.updated = false;
             }
         }
@@ -286,7 +292,7 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
                 .duration
                 .checked_sub(Duration::from_micros(16666))
                 .unwrap_or_else(|| Duration::from_micros(0));
-            if projectile.duration.as_nanos() == 0 {
+            if projectile.duration.as_micros() == 0 {
                 remove.push(entity_id);
             }
 
@@ -306,7 +312,7 @@ fn update_projectiles(mut all_storages: AllStoragesViewMut) {
                 }
 
                 if physics.overlaps_actor(entity_id, player_id) {
-                    health.take_damage(10, Some(player.client_id));
+                    health.take_damage(1, Some(player.client_id));
                     deads.add_component_unchecked(entity_id, Dead);
                 }
             }
@@ -472,7 +478,7 @@ fn create_player(
     let transform = Transform::default();
     let animation = AnimationEntity::Player.new_animation_controller();
 
-    let player_health = Health::new(50);
+    let player_health = Health::new(2);
 
     entities.add_component(
         entity_id,

@@ -6,7 +6,7 @@ use shared::{
     physics::render_physics,
     player::Player,
     projectile::Projectile,
-    EntityMapping, LobbyInfo, PlayersScore, Transform,
+    Channels, EntityMapping, LobbyInfo, PlayersScore, Transform,
 };
 
 use alto_logger::TermLogger;
@@ -20,7 +20,7 @@ use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, draw_score, UiSt
 
 use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use level::{draw_level, load_project_and_assets};
 
@@ -77,8 +77,8 @@ struct App {
     world: World,
     camera: Camera2D,
     render_target: RenderTarget,
-    connection: Option<Box<dyn Client>>,
-    request_connection: Option<RequestConnection>,
+    connection: Option<Box<dyn Client<Channels>>>,
+    request_connection: Option<RequestConnection<UnsecureClientProtocol, Channels>>,
     lobby_info: LobbyInfo,
     ui: UiState,
     server: Option<Game>,
@@ -123,7 +123,7 @@ impl App {
         args.next();
 
         let mut server = None;
-        let mut connection: Option<Box<dyn Client>> = None;
+        let mut connection: Option<Box<dyn Client<Channels>>> = None;
         let mut screen = Screen::Connect;
         if args.next().is_some() {
             let mut s = Game::new("127.0.0.1:5000".parse().unwrap()).unwrap();
@@ -155,10 +155,10 @@ impl App {
         }
 
         if let Some(connection) = self.connection.as_mut() {
-            if let Err(e) = connection.process_events(Instant::now()) {
+            if let Err(e) = connection.process_events() {
                 println!("{}", e);
             };
-            for payload in connection.receive_all_messages_from_channel(2).iter() {
+            for payload in connection.receive_all_messages_from_channel(Channels::Reliable).iter() {
                 let server_message: ServerMessages = bincode::deserialize(payload).unwrap();
                 match server_message {
                     ServerMessages::UpdateScore(score) => {
@@ -192,7 +192,7 @@ impl App {
                         self.id,
                         socket,
                         server_ip,
-                        Box::new(UnsecureClientProtocol::new(self.id)),
+                        UnsecureClientProtocol::new(self.id),
                         endpoint_config,
                         channels(),
                     )
@@ -222,7 +222,7 @@ impl App {
                 if let Some(connection) = self.connection.as_mut() {
                     if draw_lobby(&self.lobby_info, self.id) {
                         let message = bincode::serialize(&ClientAction::LobbyReady).unwrap();
-                        connection.send_message(2, message.into_boxed_slice());
+                        connection.send_message(Channels::Reliable, message.into_boxed_slice());
                     }
                 } else {
                     self.screen = Screen::Connect;
@@ -278,18 +278,22 @@ impl App {
 
         let input = self.world.run(player_input).unwrap();
         let message = bincode::serialize(&input).expect("failed to serialize message.");
-        connection.send_message(0, message.into_boxed_slice());
+        connection.send_message(Channels::ReliableCritical, message.into_boxed_slice());
 
-        for payload in connection.receive_all_messages_from_channel(1).iter() {
-            let server_frame: ServerFrame = bincode::deserialize(payload).unwrap();
-            server_frame.apply_in_world(&self.world);
+        for payload in connection.receive_all_messages_from_channel(Channels::Unreliable).iter() {
+            let server_frame = bincode::deserialize::<ServerFrame>(payload);
+            if let Ok(server_frame) = server_frame {
+                server_frame.apply_in_world(&self.world);
+            } else {
+                println!("Error deserializing {:?}", server_frame);
+            }
         }
 
         self.world.run(draw_level).unwrap();
         self.world.run(draw_players).unwrap();
         self.world.run(draw_projectiles).unwrap();
         self.world.run(draw_score).unwrap();
-        
+
         // Debug server physics when host
         if let Some(server) = self.server.as_ref() {
             server.world.run_with_data(render_physics, UPSCALE).unwrap();

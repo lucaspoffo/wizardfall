@@ -44,10 +44,10 @@
 			"gridTiles": [],
 			"entityInstances": [
 				{ "__identifier": "PlayerRespawn", "__grid": [2,4], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [20,40], "fieldInstances": [] },
-				{ "__identifier": "PlayerRespawn", "__grid": [39,4], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [316,40], "fieldInstances": [] },
+				{ "__identifier": "PlayerRespawn", "__grid": [38,4], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [308,40], "fieldInstances": [] },
 				{ "__identifier": "PlayerRespawn", "__grid": [28,21], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [228,176], "fieldInstances": [] },
-				{ "__identifier": "PlayerRespawn", "__grid": [13,21], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [108,176], "fieldInstances": [] },
-				{ "__identifier": "PlayerRespawn", "__grid": [9,12], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [76,104], "fieldInstances": [] },
+				{ "__identifier": "PlayerRespawn", "__grid": [12,21], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [100,176], "fieldInstances": [] },
+				{ "__identifier": "PlayerRespawn", "__grid": [8,12], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [68,104], "fieldInstances": [] },
 				{ "__identifier": "PlayerRespawn", "__grid": [32,12], "__pivot": [0.5,1], "__tile": null, "defUid": 92, "px": [260,104], "fieldInstances": [] }
 			]
 		},
