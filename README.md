@@ -7,6 +7,7 @@ Simple platform game to test the Renet API, features:
 - ECS gameplay code
 - Server State replication
 - Custom physics
+- Level creation with [LDtk](https://ldtk.io/)
 
 ## Preview
-![alt text](windfall.gif)
+![demo gif](windfall.gif)
