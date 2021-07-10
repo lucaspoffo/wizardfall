@@ -13,10 +13,10 @@ use shared::{
 
 use bincode::{deserialize, serialize};
 use renet::{
-    client::HostClient,
-    endpoint::EndpointConfig,
+    client::LocalClientConnected,
     error::RenetError,
     protocol::unsecure::UnsecureServerProtocol,
+    remote_connection::ConnectionConfig,
     server::{Server, ServerConfig, ServerEvent},
 };
 
@@ -36,7 +36,7 @@ enum Scene {
 pub struct Game {
     pub world: World,
     scene: Scene,
-    server: Server<UnsecureServerProtocol, Channels>,
+    server: Server<UnsecureServerProtocol>,
     lobby_info: LobbyInfo,
     lobby_updated: bool,
 }
@@ -77,10 +77,10 @@ impl Game {
     pub fn new(addr: SocketAddr) -> Result<Self, RenetError> {
         let socket = UdpSocket::bind(addr)?;
         let server_config = ServerConfig::default();
-        let endpoint_config = EndpointConfig::default();
+        let connection_config = ConnectionConfig::default();
 
-        let server: Server<UnsecureServerProtocol, Channels> =
-            Server::new(socket, server_config, endpoint_config, channels())?;
+        let server: Server<UnsecureServerProtocol> =
+            Server::new(socket, server_config, connection_config, channels())?;
 
         let mut world = World::new();
         load_level_collisions(&mut world);
@@ -110,20 +110,21 @@ impl Game {
         })
     }
 
-    pub fn get_host_client(&mut self, client_id: u64) -> HostClient<Channels> {
-        self.server.create_host_client(client_id)
+    pub fn get_host_client(&mut self, client_id: u64) -> LocalClientConnected {
+        self.server.create_local_client(client_id)
     }
 
     pub fn update(&mut self) {
         self.lobby_updated = false;
-        self.server.update();
-        for (client_id, messages) in self
-            .server
-            .get_messages_from_channel(Channels::ReliableCritical)
-            .iter()
-        {
-            for message in messages.iter() {
-                let input: PlayerInput = deserialize(message).expect("Failed to deserialize.");
+        if let Err(e) = self.server.update() {
+            println!("{}", e);
+        }
+        for client_id in self.server.get_clients_id().iter() {
+            while let Ok(Some(message)) = self
+                .server
+                .receive_message(*client_id, Channels::ReliableCritical)
+            {
+                let input: PlayerInput = deserialize(&message).expect("Failed to deserialize.");
                 self.world
                     .run(
                         |player_mapping: UniqueView<PlayerMapping>,
@@ -135,15 +136,11 @@ impl Game {
                     )
                     .unwrap();
             }
-        }
 
-        for (client_id, messages) in self
-            .server
-            .get_messages_from_channel(Channels::Reliable)
-            .iter()
-        {
-            for message in messages.iter() {
-                let player_action: ClientAction = deserialize(message).unwrap();
+            while let Ok(Some(message)) =
+                self.server.receive_message(*client_id, Channels::Reliable)
+            {
+                let player_action: ClientAction = deserialize(&message).unwrap();
                 self.handle_client_action(player_action, client_id);
             }
         }
@@ -183,15 +180,15 @@ impl Game {
                 if start_lobby {
                     self.scene = Scene::Gameplay;
                     let start_gameplay = ServerMessages::StartGameplay;
-                    let start_gameplay = serialize(&start_gameplay).unwrap().into_boxed_slice();
+                    let start_gameplay = serialize(&start_gameplay).unwrap();
                     self.server
-                        .send_message_to_all_clients(Channels::Reliable, start_gameplay);
+                        .broadcast_message(Channels::Reliable, start_gameplay);
                 }
                 if self.lobby_updated {
                     let lobby_update = ServerMessages::UpdateLobby(self.lobby_info.clone());
-                    let lobby_update = serialize(&lobby_update).unwrap().into_boxed_slice();
+                    let lobby_update = serialize(&lobby_update).unwrap();
                     self.server
-                        .send_message_to_all_clients(Channels::Reliable, lobby_update);
+                        .broadcast_message(Channels::Reliable, lobby_update);
                 }
             }
             Scene::Gameplay => {
@@ -244,18 +241,18 @@ impl Game {
         }
 
         let server_frame = ServerFrame::from_world(&self.world);
-        let server_frame = serialize(&server_frame).unwrap().into_boxed_slice();
+        let server_frame = serialize(&server_frame).unwrap();
         self.server
-            .send_message_to_all_clients(Channels::Unreliable, server_frame);
+            .broadcast_message(Channels::Unreliable, server_frame);
 
         // Send score update to clients
         {
             let mut score = self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
             if score.updated {
                 let score_message = ServerMessages::UpdateScore((*score).clone());
-                let score_message = serialize(&score_message).unwrap().into_boxed_slice();
+                let score_message = serialize(&score_message).unwrap();
                 self.server
-                    .send_message_to_all_clients(Channels::Unreliable, score_message);
+                    .broadcast_message(Channels::Reliable, score_message);
                 score.updated = false;
             }
         }

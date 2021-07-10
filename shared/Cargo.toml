@@ -5,11 +5,13 @@ authors = ["Lucas Poffo <ltkpoffo@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.dev.package.'*']
+opt-level = 3
 
 [dependencies]
 renet = { path = "../../renet" }
 derive = { path = "../derive" }
-macroquad = { version = "=0.3.0-alpha.14", features = [ "log-impl" ] }
+macroquad = { git = "https://github.com/not-fl3/macroquad.git", features = [ "log-impl" ] }
 serde = "1"
 glam = { version = "0.10", features = [ "serde" ] }
 shipyard = { git = "https://github.com/leudz/shipyard.git", version = "0.4.1", features = [ "serde1" ] }

@@ -11,9 +11,9 @@ use shared::{
 
 use alto_logger::TermLogger;
 use renet::{
-    client::{Client, RequestConnection},
-    endpoint::EndpointConfig,
+    client::{Client, RemoteClient},
     protocol::unsecure::UnsecureClientProtocol,
+    remote_connection::ConnectionConfig,
 };
 use shipyard::*;
 use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, draw_score, UiState};
@@ -77,8 +77,7 @@ struct App {
     world: World,
     camera: Camera2D,
     render_target: RenderTarget,
-    connection: Option<Box<dyn Client<Channels>>>,
-    request_connection: Option<RequestConnection<UnsecureClientProtocol, Channels>>,
+    connection: Option<Box<dyn Client>>,
     lobby_info: LobbyInfo,
     ui: UiState,
     server: Option<Game>,
@@ -123,7 +122,7 @@ impl App {
         args.next();
 
         let mut server = None;
-        let mut connection: Option<Box<dyn Client<Channels>>> = None;
+        let mut connection: Option<Box<dyn Client>> = None;
         let mut screen = Screen::Connect;
         if args.next().is_some() {
             let mut s = Game::new("127.0.0.1:5000".parse().unwrap()).unwrap();
@@ -139,7 +138,6 @@ impl App {
             world,
             camera,
             screen,
-            request_connection: None,
             lobby_info: LobbyInfo::default(),
             connection,
             server,
@@ -155,11 +153,11 @@ impl App {
         }
 
         if let Some(connection) = self.connection.as_mut() {
-            if let Err(e) = connection.process_events() {
-                println!("{}", e);
+            if let Err(e) = connection.update() {
+                println!("Client process events error: {}", e);
             };
-            for payload in connection.receive_all_messages_from_channel(Channels::Reliable).iter() {
-                let server_message: ServerMessages = bincode::deserialize(payload).unwrap();
+            while let Ok(Some(message)) = connection.receive_message(Channels::Reliable.into()) {
+                let server_message: ServerMessages = bincode::deserialize(&message).unwrap();
                 match server_message {
                     ServerMessages::UpdateScore(score) => {
                         let mut player_scores =
@@ -184,45 +182,47 @@ impl App {
                 if let Some(server_ip) = draw_connect_menu(&mut self.ui) {
                     self.screen = Screen::Connecting;
                     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-                    let endpoint_config = EndpointConfig::default();
+                    let connection_config = ConnectionConfig::default();
 
                     println!("Client ID: {}", self.id);
 
-                    let request_connection = RequestConnection::new(
+                    let connection = RemoteClient::new(
                         self.id,
                         socket,
                         server_ip,
-                        UnsecureClientProtocol::new(self.id),
-                        endpoint_config,
                         channels(),
+                        UnsecureClientProtocol::new(self.id),
+                        connection_config,
                     )
                     .unwrap();
 
-                    self.request_connection = Some(request_connection);
+                    self.connection = Some(Box::new(connection));
                 }
             }
             Screen::Connecting => {
                 draw_connection_screen(&mut self.ui);
-                match self.request_connection.as_mut().unwrap().update() {
-                    Ok(Some(connection)) => {
-                        self.connection = Some(Box::new(connection));
-                        self.request_connection = None;
-                        self.screen = Screen::Lobby;
-                        self.ui.connect_error = None;
-                    }
-                    Ok(None) => {}
-                    Err(_) => {
+                if self.connection.as_mut().unwrap().is_connected() {
+                    self.screen = Screen::Lobby;
+                    self.ui.connect_error = None;
+                };
+
+                /*
+                if self.connection.as_mut().unwrap().is_disconnected() {
                         self.screen = Screen::Connect;
                         self.request_connection = None;
                         self.ui.connect_error = Some("Server timed out.".into());
                     }
                 }
+                */
             }
             Screen::Lobby => {
                 if let Some(connection) = self.connection.as_mut() {
                     if draw_lobby(&self.lobby_info, self.id) {
                         let message = bincode::serialize(&ClientAction::LobbyReady).unwrap();
-                        connection.send_message(Channels::Reliable, message.into_boxed_slice());
+                        if let Err(e) = connection.send_message(Channels::Reliable.into(), message)
+                        {
+                            println!("error sending message: {}", e);
+                        }
                     }
                 } else {
                     self.screen = Screen::Connect;
@@ -278,10 +278,12 @@ impl App {
 
         let input = self.world.run(player_input).unwrap();
         let message = bincode::serialize(&input).expect("failed to serialize message.");
-        connection.send_message(Channels::ReliableCritical, message.into_boxed_slice());
+        if let Err(e) = connection.send_message(Channels::ReliableCritical.into(), message) {
+            println!("Error sending message: {}", e);
+        }
 
-        for payload in connection.receive_all_messages_from_channel(Channels::Unreliable).iter() {
-            let server_frame = bincode::deserialize::<ServerFrame>(payload);
+        while let Ok(Some(message)) = connection.receive_message(Channels::Unreliable.into()) {
+            let server_frame = bincode::deserialize::<ServerFrame>(&message);
             if let Ok(server_frame) = server_frame {
                 server_frame.apply_in_world(&self.world);
             } else {

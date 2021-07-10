@@ -36,7 +36,7 @@ impl Into<u8> for Channels {
     }   
 }
 
-pub fn channels() -> HashMap<Channels, Box<dyn ChannelConfig>> {
+pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
     let reliable_config = ReliableOrderedChannelConfig {
         message_resend_time: Duration::from_millis(100),
         ..Default::default()
@@ -52,10 +52,10 @@ pub fn channels() -> HashMap<Channels, Box<dyn ChannelConfig>> {
 
     let unreliable_config = UnreliableUnorderedChannelConfig::default();
 
-    let mut channels_config: HashMap<Channels, Box<dyn ChannelConfig>> = HashMap::new();
-    channels_config.insert(Channels::Reliable, Box::new(reliable_config));
-    channels_config.insert(Channels::Unreliable, Box::new(unreliable_config));
-    channels_config.insert(Channels::ReliableCritical, Box::new(reliable_critical_channel));
+    let mut channels_config: HashMap<u8, Box<dyn ChannelConfig>> = HashMap::new();
+    channels_config.insert(Channels::Reliable.into(), Box::new(reliable_config));
+    channels_config.insert(Channels::Unreliable.into(), Box::new(unreliable_config));
+    channels_config.insert(Channels::ReliableCritical.into(), Box::new(reliable_critical_channel));
     channels_config
 }
 
