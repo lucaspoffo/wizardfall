@@ -9,8 +9,9 @@ edition = "2018"
 opt-level = 3
 
 [dependencies]
-macroquad = { git = "https://github.com/not-fl3/macroquad.git", features = [ "log-impl" ] }
-renet = { path = "../../renet" }
+macroquad = "0.3.13"
+renet_udp = "0.0.2"
+# renet_udp = { path = "../../renet/renet_udp" }
 shared = { path = "../shared" }
 bincode = "1.3.1"
 log = "0.4.11"

@@ -9,12 +9,13 @@ edition = "2018"
 opt-level = 3
 
 [dependencies]
-renet = { path = "../../renet" }
+# renet_udp = { path = "../../renet/renet_udp" }
+renet_udp = "0.0.2"
 shared = { path = "../shared" }
 bincode = "1.3.1"
 log = "0.4.11"
 alto_logger = "0.3.6"
-glam = { version = "0.10", features = [ "serde" ] }
+glam = { version = "0.14", features = [ "serde" ] }
 shipyard = { git = "https://github.com/leudz/shipyard.git", version = "0.4.1", features = [ "serde1" ] }
 # TODO: remove this and use only miniquad as an debug feature.
 eframe = "0.9.0"

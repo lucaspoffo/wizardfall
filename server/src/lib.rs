@@ -1,6 +1,6 @@
 use shared::{
     animation::{AnimationController, AnimationEntity},
-    channels,
+    channels_config,
     ldtk::{load_level_collisions, PlayerRespawnPoints},
     message::{ClientAction, ServerMessages},
     network::ServerFrame,
@@ -8,25 +8,23 @@ use shared::{
     player::{Player, PlayerInput},
     projectile::{Projectile, ProjectileType},
     timer::Timer,
-    Channels, ClientInfo, Health, LobbyInfo, PlayersScore, Transform,
+    Channel, ClientInfo, Health, LobbyInfo, PlayersScore, Transform,
+};
+
+use renet_udp::{
+    renet::remote_connection::ConnectionConfig,
+    server::{ServerEvent, UdpServer},
 };
 
 use bincode::{deserialize, serialize};
-use renet::{
-    client::LocalClientConnected,
-    error::RenetError,
-    protocol::unsecure::UnsecureServerProtocol,
-    remote_connection::ConnectionConfig,
-    server::{Server, ServerConfig, ServerEvent},
-};
 
 use glam::{vec2, Vec2};
 use shipyard::*;
 
-use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::net::UdpSocket;
 use std::time::Duration;
+use std::{collections::HashMap, io};
+use std::{net::SocketAddr, time::Instant};
 
 enum Scene {
     Lobby,
@@ -36,7 +34,8 @@ enum Scene {
 pub struct Game {
     pub world: World,
     scene: Scene,
-    server: Server<UnsecureServerProtocol>,
+    server: UdpServer,
+    last_updated: Instant,
     lobby_info: LobbyInfo,
     lobby_updated: bool,
 }
@@ -71,16 +70,16 @@ impl Default for GameplayConfig {
     }
 }
 
-type PlayerMapping = HashMap<u64, EntityId>;
+type PlayerMapping = HashMap<SocketAddr, EntityId>;
 
 impl Game {
-    pub fn new(addr: SocketAddr) -> Result<Self, RenetError> {
+    pub fn new(addr: SocketAddr) -> Result<Self, io::Error> {
         let socket = UdpSocket::bind(addr)?;
-        let server_config = ServerConfig::default();
-        let connection_config = ConnectionConfig::default();
-
-        let server: Server<UnsecureServerProtocol> =
-            Server::new(socket, server_config, connection_config, channels())?;
+        let connection_config = ConnectionConfig {
+            channels_config: channels_config(),
+            ..Default::default()
+        };
+        let server: UdpServer = UdpServer::new(64, connection_config, socket).unwrap();
 
         let mut world = World::new();
         load_level_collisions(&mut world);
@@ -105,24 +104,24 @@ impl Game {
             world,
             server,
             scene: Scene::Lobby,
+            last_updated: Instant::now(),
             lobby_info: LobbyInfo::default(),
             lobby_updated: false,
         })
     }
 
-    pub fn get_host_client(&mut self, client_id: u64) -> LocalClientConnected {
-        self.server.create_local_client(client_id)
-    }
-
     pub fn update(&mut self) {
         self.lobby_updated = false;
-        if let Err(e) = self.server.update() {
+        let now = Instant::now();
+        let frame_duration = now - self.last_updated;
+        self.last_updated = now;
+        if let Err(e) = self.server.update(frame_duration) {
             println!("{}", e);
         }
-        for client_id in self.server.get_clients_id().iter() {
-            while let Ok(Some(message)) = self
+        for client_id in self.server.clients_id().iter() {
+            while let Some(message) = self
                 .server
-                .receive_message(*client_id, Channels::ReliableCritical)
+                .receive_message(client_id, Channel::ReliableCritical.id())
             {
                 let input: PlayerInput = deserialize(&message).expect("Failed to deserialize.");
                 self.world
@@ -137,8 +136,9 @@ impl Game {
                     .unwrap();
             }
 
-            while let Ok(Some(message)) =
-                self.server.receive_message(*client_id, Channels::Reliable)
+            while let Some(message) = self
+                .server
+                .receive_message(client_id, Channel::Reliable.id())
             {
                 let player_action: ClientAction = deserialize(&message).unwrap();
                 self.handle_client_action(player_action, client_id);
@@ -158,7 +158,7 @@ impl Game {
                         })
                         .unwrap();
                 }
-                ServerEvent::ClientDisconnected(id) => {
+                ServerEvent::ClientDisconnected(id, _) => {
                     self.lobby_info.clients.remove(&id);
                     self.lobby_updated = true;
 
@@ -182,13 +182,13 @@ impl Game {
                     let start_gameplay = ServerMessages::StartGameplay;
                     let start_gameplay = serialize(&start_gameplay).unwrap();
                     self.server
-                        .broadcast_message(Channels::Reliable, start_gameplay);
+                        .broadcast_message(Channel::Reliable.id(), start_gameplay);
                 }
                 if self.lobby_updated {
                     let lobby_update = ServerMessages::UpdateLobby(self.lobby_info.clone());
                     let lobby_update = serialize(&lobby_update).unwrap();
                     self.server
-                        .broadcast_message(Channels::Reliable, lobby_update);
+                        .broadcast_message(Channel::Reliable.id(), lobby_update);
                 }
             }
             Scene::Gameplay => {
@@ -196,7 +196,7 @@ impl Game {
             }
         }
 
-        self.server.send_packets();
+        self.server.send_packets().unwrap();
     }
 
     fn update_gameplay(&mut self) {
@@ -243,7 +243,7 @@ impl Game {
         let server_frame = ServerFrame::from_world(&self.world);
         let server_frame = serialize(&server_frame).unwrap();
         self.server
-            .broadcast_message(Channels::Unreliable, server_frame);
+            .broadcast_message(Channel::Unreliable.id(), server_frame);
 
         // Send score update to clients
         {
@@ -252,13 +252,13 @@ impl Game {
                 let score_message = ServerMessages::UpdateScore((*score).clone());
                 let score_message = serialize(&score_message).unwrap();
                 self.server
-                    .broadcast_message(Channels::Reliable, score_message);
+                    .broadcast_message(Channel::Reliable.id(), score_message);
                 score.updated = false;
             }
         }
     }
 
-    fn handle_client_action(&mut self, action: ClientAction, client_id: &u64) {
+    fn handle_client_action(&mut self, action: ClientAction, client_id: &SocketAddr) {
         match action {
             ClientAction::LobbyReady => {
                 let client_info = self.lobby_info.clients.get_mut(client_id).unwrap();
@@ -350,7 +350,7 @@ fn cast_fireball_player(
 
             let speed = input.direction * (200. * (1. + player.fireball_charge * 3.));
             let projectile = Projectile::new(ProjectileType::Fireball, speed, player_id);
-            let rotation = input.direction.angle_between(Vec2::unit_x());
+            let rotation = input.direction.angle_between(Vec2::X);
 
             let projectile_transform = Transform::new(pos, rotation);
             created_projectiles.push((entity_id, (projectile, projectile_transform)));
@@ -447,7 +447,7 @@ fn update_players_cooldown(mut players: ViewMut<Player>) {
 }
 
 fn create_player(
-    client_id: u64,
+    client_id: SocketAddr,
     player_respawn_points: UniqueView<PlayerRespawnPoints>,
     mut entities: EntitiesViewMut,
     mut transforms: ViewMut<Transform>,
@@ -486,7 +486,7 @@ fn create_player(
     player_mapping.insert(client_id, entity_id);
 }
 
-fn remove_player(client_id: u64, mut all_storages: AllStoragesViewMut) {
+fn remove_player(client_id: SocketAddr, mut all_storages: AllStoragesViewMut) {
     let player_entity_id = {
         let mut player_mapping = all_storages
             .borrow::<UniqueViewMut<PlayerMapping>>()

@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use macroquad::prelude::*;
 use shared::{
     animation::AnimationController,
@@ -9,7 +11,7 @@ use shipyard::*;
 
 use crate::animation::{AnimationTextures, TextureAnimation, Textures};
 use crate::ui::mouse_to_screen;
-use crate::ClientInfo;
+use crate::ClientState;
 use crate::UPSCALE;
 
 pub fn draw_players(
@@ -27,7 +29,7 @@ pub fn draw_players(
         let x = transform.position.x;
         let y = transform.position.y;
         let flip_x =
-            player.direction.angle_between(Vec2::unit_x()).abs() > std::f32::consts::PI / 2.0;
+            player.direction.angle_between(Vec2::X).abs() > std::f32::consts::PI / 2.0;
 
         texture_animation.draw(x, y, flip_x, animation_controller);
 
@@ -53,7 +55,7 @@ pub fn draw_players(
         let wand_params = DrawTextureParams {
             dest_size: Some(vec2(16. * UPSCALE, 16. * UPSCALE)),
             pivot: Some(vec2(center_x * UPSCALE, center_y * UPSCALE)),
-            rotation: -player.direction.angle_between(Vec2::unit_x()),
+            rotation: -player.direction.angle_between(Vec2::X),
             ..Default::default()
         };
         draw_texture_ex(
@@ -89,13 +91,13 @@ pub fn draw_players(
 
 pub fn player_input(
     transforms: View<Transform>,
-    client_info: UniqueView<ClientInfo>,
+    client_state: UniqueView<ClientState>,
 ) -> PlayerInput {
-    if client_info.entity_id.is_none() {
+    if client_state.entity_id.is_none() {
         return PlayerInput::default();
     }
 
-    let entity_id = client_info.entity_id.unwrap();
+    let entity_id = client_state.entity_id.unwrap();
     let transform = transforms.get(entity_id).unwrap();
 
     let direction = (mouse_to_screen() - (transform.position + vec2(6., 8.))).normalize();
@@ -121,29 +123,33 @@ pub fn player_input(
 }
 
 pub fn track_client_entity(
+    client_id: SocketAddr,
     mut players: ViewMut<Player>,
-    mut client_info: UniqueViewMut<ClientInfo>,
+    mut client_state: UniqueViewMut<ClientState>,
 ) {
+    if client_state.client_id != client_id {
+        client_state.client_id = client_id;
+    }
     for (entity_id, player) in players.inserted().iter().with_id() {
-        if player.client_id == client_info.client_id {
-            client_info.entity_id = Some(entity_id);
+        if player.client_id == client_state.client_id {
+            client_state.entity_id = Some(entity_id);
         }
     }
 
     for (_, player) in players.take_deleted().iter() {
-        if player.client_id == client_info.client_id {
-            client_info.entity_id = None;
+        if player.client_id == client_state.client_id {
+            client_state.entity_id = None;
         }
     }
 }
 
 pub async fn load_player_texture(world: &mut World) {
-    let idle_texture: Texture2D = load_texture("../levels/atlas/Wizard.png").await;
-    set_texture_filter(idle_texture, FilterMode::Nearest);
+    let idle_texture: Texture2D = load_texture("../levels/atlas/Wizard.png").await.unwrap();
+    idle_texture.set_filter(FilterMode::Nearest);
 
     let player_animation = TextureAnimation::new(idle_texture, 16, 16, vec2(-1., -3.));
-    let wand = load_texture("Arm.png").await;
-    set_texture_filter(wand, FilterMode::Nearest);
+    let wand = load_texture("Arm.png").await.unwrap();
+    wand.set_filter(FilterMode::Nearest);
 
     world
         .borrow::<UniqueViewMut<Textures>>()

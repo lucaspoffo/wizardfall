@@ -1,12 +1,9 @@
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, net::SocketAddr, time::Duration};
 
 use glam::{vec2, Vec2};
-use renet::channel::{
-    ChannelConfig, ReliableOrderedChannelConfig, UnreliableUnorderedChannelConfig,
-};
 use serde::{Deserialize, Serialize};
 use shipyard::EntityId;
+use renet_udp::renet::channel::{ChannelConfig, ReliableChannelConfig, UnreliableChannelConfig};
 
 use derive::NetworkState;
 
@@ -23,46 +20,40 @@ pub mod math;
 // Server EntityId -> Client EntityId
 pub type EntityMapping = HashMap<EntityId, EntityId>;
 
-#[derive(Debug, Hash, Eq, PartialEq)]
-pub enum Channels {
-    Reliable = 1,
-    ReliableCritical = 2,
-    Unreliable = 3,
-}
-
-impl Into<u8> for Channels {
-    fn into(self) -> u8 {
-        self as u8
-    }   
-}
-
-pub fn channels() -> HashMap<u8, Box<dyn ChannelConfig>> {
-    let reliable_config = ReliableOrderedChannelConfig {
-        message_resend_time: Duration::from_millis(100),
-        ..Default::default()
-    };
-
-    // We resend every message every frame until acked
-    // This is very consuming, but since we will be using for PlayerInput
-    // There is really not a problem.
-    let reliable_critical_channel = ReliableOrderedChannelConfig {
-        message_resend_time: Duration::from_millis(0),
-        ..Default::default()
-    };
-
-    let unreliable_config = UnreliableUnorderedChannelConfig::default();
-
-    let mut channels_config: HashMap<u8, Box<dyn ChannelConfig>> = HashMap::new();
-    channels_config.insert(Channels::Reliable.into(), Box::new(reliable_config));
-    channels_config.insert(Channels::Unreliable.into(), Box::new(unreliable_config));
-    channels_config.insert(Channels::ReliableCritical.into(), Box::new(reliable_critical_channel));
-    channels_config
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Transform {
     pub position: Vec2,
     pub rotation: f32,
+}
+
+#[repr(u8)]
+pub enum Channel {
+    Reliable = 0,
+    ReliableCritical = 1,
+    Unreliable = 2,
+}
+
+impl Channel {
+    pub fn id(self) -> u8 {
+        self as u8
+    }
+}
+
+pub fn channels_config() -> Vec<ChannelConfig> {
+    let reliable = ChannelConfig::Reliable(ReliableChannelConfig {
+        channel_id: Channel::Reliable.id(),
+        ..Default::default()
+    });
+    let reliable_critical = ChannelConfig::Reliable(ReliableChannelConfig {
+        channel_id: Channel::ReliableCritical.id(),
+        message_resend_time: Duration::ZERO,
+        ..Default::default()
+    });
+    let unreliable = ChannelConfig::Unreliable(UnreliableChannelConfig {
+        channel_id: Channel::Unreliable.id(),
+        ..Default::default()
+    });
+    vec![reliable, reliable_critical, unreliable]
 }
 
 impl Default for Transform {
@@ -91,14 +82,14 @@ impl Default for ClientInfo {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LobbyInfo {
-    pub clients: HashMap<u64, ClientInfo>,
+    pub clients: HashMap<SocketAddr, ClientInfo>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct PlayersScore {
-    pub score: HashMap<u64, u8>,
+    pub score: HashMap<SocketAddr, u8>,
     pub updated: bool
 }
 
@@ -106,7 +97,7 @@ pub struct PlayersScore {
 pub struct Health {
     pub max: u8,
     pub current: u8,
-    pub killer: Option<u64>,
+    pub killer: Option<SocketAddr>,
 }
 
 impl Health {
@@ -118,7 +109,7 @@ impl Health {
         }
     }
 
-    pub fn take_damage(&mut self, damage: u8, damage_dealer: Option<u64>) {
+    pub fn take_damage(&mut self, damage: u8, damage_dealer: Option<SocketAddr>) {
         if self.is_dead() {
             return;
         }

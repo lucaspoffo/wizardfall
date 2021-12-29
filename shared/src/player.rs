@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +9,7 @@ use crate::timer::TimerSimple;
 
 #[derive(Debug, Clone, Serialize, Deserialize, NetworkState)]
 pub struct Player {
-    pub client_id: u64,
+    pub client_id: SocketAddr,
     pub direction: Vec2,
     pub fireball_cooldown: TimerSimple,
     pub fireball_charge: f32,
@@ -19,7 +21,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(client_id: u64) -> Self {
+    pub fn new(client_id: SocketAddr) -> Self {
         let mut fireball_cooldown = TimerSimple::new(1.5);
         fireball_cooldown.finish();
 
@@ -28,14 +30,14 @@ impl Player {
 
         Self {
             client_id,
-            direction: Vec2::zero(),
+            direction: Vec2::ZERO,
             fireball_cooldown,
             dash_cooldown,
             dash_duration: 0.2,
             fireball_max_charge: 0.7,
             fireball_charge: 0.0,
             current_dash_duration: 0.0,
-            speed: Vec2::zero(),
+            speed: Vec2::ZERO,
         }
     }
 }
@@ -62,7 +64,7 @@ impl Default for PlayerInput {
             dash: false,
             fire: false,
             jump: false,
-            direction: Vec2::zero(),
+            direction: Vec2::ZERO,
         }
     }
 }

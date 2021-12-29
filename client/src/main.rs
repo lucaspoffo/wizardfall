@@ -1,26 +1,23 @@
 use macroquad::prelude::*;
 use shared::{
-    channels,
+    channels_config,
     message::{ClientAction, ServerMessages},
     network::ServerFrame,
     physics::render_physics,
     player::Player,
     projectile::Projectile,
-    Channels, EntityMapping, LobbyInfo, PlayersScore, Transform,
+    Channel, EntityMapping, LobbyInfo, PlayersScore, Transform,
 };
+
+use renet_udp::{client::UdpClient, renet::remote_connection::ConnectionConfig};
 
 use alto_logger::TermLogger;
-use renet::{
-    client::{Client, RemoteClient},
-    protocol::unsecure::UnsecureClientProtocol,
-    remote_connection::ConnectionConfig,
-};
 use shipyard::*;
-use ui::{draw_connect_menu, draw_connection_screen, draw_lobby, draw_score, UiState};
+use ui::{draw_connect_menu, draw_lobby, draw_score, ConnectMenuResponse, UiState};
 
-use std::collections::HashMap;
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, time::Instant};
 
 use level::{draw_level, load_project_and_assets};
 
@@ -44,8 +41,14 @@ async fn main() {
             .as_secs(),
     );
 
-    let id = rand::rand() as u64;
+    let id = "127.0.0.1:0".parse().unwrap();
     let mut app = App::new(id);
+
+    let mut args = std::env::args();
+    args.next();
+    if args.next().is_some() {
+        app.host("127.0.0.1:5000".parse().unwrap());
+    }
 
     load_player_texture(&mut app.world).await;
     load_project_and_assets(&app.world).await;
@@ -64,34 +67,33 @@ pub const RY: f32 = 192.;
 pub const UPSCALE: f32 = 10.;
 
 pub enum Screen {
-    MainMenu,
     Connect,
     Lobby,
     Gameplay,
-    Connecting,
 }
 
 struct App {
-    id: u64,
+    id: SocketAddr,
     screen: Screen,
     world: World,
     camera: Camera2D,
     render_target: RenderTarget,
-    connection: Option<Box<dyn Client>>,
+    client: Option<UdpClient>,
     lobby_info: LobbyInfo,
     ui: UiState,
     server: Option<Game>,
+    last_updated: Instant,
 }
 
-pub struct ClientInfo {
-    pub client_id: u64,
+pub struct ClientState {
+    pub client_id: SocketAddr,
     pub entity_id: Option<EntityId>,
 }
 
 impl App {
-    fn new(id: u64) -> Self {
+    fn new(id: SocketAddr) -> Self {
         let render_target = render_target((RX * UPSCALE) as u32, (RY * UPSCALE) as u32);
-        set_texture_filter(render_target.texture, FilterMode::Nearest);
+        render_target.texture.set_filter(FilterMode::Nearest);
 
         let camera = Camera2D {
             zoom: vec2(1.0 / (RX * UPSCALE) * 2., 1.0 / (RY * UPSCALE) * 2.),
@@ -102,7 +104,7 @@ impl App {
 
         let world = World::new();
 
-        let client_info = ClientInfo {
+        let client_info = ClientState {
             client_id: id,
             entity_id: None,
         };
@@ -118,18 +120,9 @@ impl App {
         // Tracking of components
         world.borrow::<ViewMut<Player>>().unwrap().track_all();
 
-        let mut args = std::env::args();
-        args.next();
-
-        let mut server = None;
-        let mut connection: Option<Box<dyn Client>> = None;
-        let mut screen = Screen::Connect;
-        if args.next().is_some() {
-            let mut s = Game::new("127.0.0.1:5000".parse().unwrap()).unwrap();
-            connection = Some(Box::new(s.get_host_client(id)));
-            screen = Screen::Lobby;
-            server = Some(s);
-        }
+        let server = None;
+        let client: Option<UdpClient> = None;
+        let screen = Screen::Connect;
 
         Self {
             render_target,
@@ -139,39 +132,52 @@ impl App {
             camera,
             screen,
             lobby_info: LobbyInfo::default(),
-            connection,
+            client,
             server,
+            last_updated: Instant::now(),
         }
     }
 
     async fn update(&mut self) {
-        set_camera(self.camera);
+        set_camera(&self.camera);
         clear_background(BLACK);
 
         if let Some(server) = self.server.as_mut() {
             server.update();
         }
 
-        if let Some(connection) = self.connection.as_mut() {
-            if let Err(e) = connection.update() {
-                println!("Client process events error: {}", e);
-            };
-            while let Ok(Some(message)) = connection.receive_message(Channels::Reliable.into()) {
-                let server_message: ServerMessages = bincode::deserialize(&message).unwrap();
-                match server_message {
-                    ServerMessages::UpdateScore(score) => {
-                        let mut player_scores =
-                            self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
-                        player_scores.score = score.score;
-                    }
-                    ServerMessages::UpdateLobby(lobby_info) => {
-                        self.lobby_info = lobby_info;
-                    }
-                    ServerMessages::StartGameplay => {
-                        self.screen = Screen::Gameplay;
+        let now = Instant::now();
+        let frame_duration = now - self.last_updated;
+        self.last_updated = now;
+        let mut has_client_error = false;
+        if let Some(client) = self.client.as_mut() {
+            if let Err(e) = client.update(frame_duration) {
+                self.ui.connect_error = Some(format!("{}", e));
+                self.screen = Screen::Connect;
+                self.server = None;
+                has_client_error = true;
+                println!("Client update error: {}", e);
+            } else {
+                while let Some(message) = client.receive_message(Channel::Reliable.id()) {
+                    let server_message: ServerMessages = bincode::deserialize(&message).unwrap();
+                    match server_message {
+                        ServerMessages::UpdateScore(score) => {
+                            let mut player_scores =
+                                self.world.borrow::<UniqueViewMut<PlayersScore>>().unwrap();
+                            player_scores.score = score.score;
+                        }
+                        ServerMessages::UpdateLobby(lobby_info) => {
+                            self.lobby_info = lobby_info;
+                        }
+                        ServerMessages::StartGameplay => {
+                            self.screen = Screen::Gameplay;
+                        }
                     }
                 }
             }
+        }
+        if has_client_error {
+            self.client = None;
         }
 
         match self.screen {
@@ -179,48 +185,34 @@ impl App {
                 self.render_gameplayer();
             }
             Screen::Connect => {
-                if let Some(server_ip) = draw_connect_menu(&mut self.ui) {
-                    self.screen = Screen::Connecting;
-                    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-                    let connection_config = ConnectionConfig::default();
-
-                    println!("Client ID: {}", self.id);
-
-                    let connection = RemoteClient::new(
-                        self.id,
-                        socket,
-                        server_ip,
-                        channels(),
-                        UnsecureClientProtocol::new(self.id),
-                        connection_config,
-                    )
-                    .unwrap();
-
-                    self.connection = Some(Box::new(connection));
-                }
-            }
-            Screen::Connecting => {
-                draw_connection_screen(&mut self.ui);
-                if self.connection.as_mut().unwrap().is_connected() {
-                    self.screen = Screen::Lobby;
-                    self.ui.connect_error = None;
-                };
-
-                /*
-                if self.connection.as_mut().unwrap().is_disconnected() {
-                        self.screen = Screen::Connect;
-                        self.request_connection = None;
-                        self.ui.connect_error = Some("Server timed out.".into());
+                let ConnectMenuResponse {
+                    addr,
+                    host,
+                    connect,
+                } = draw_connect_menu(&mut self.ui);
+                if let Some(server_addr) = addr {
+                    if host {
+                        self.host(server_addr);
+                    } else if connect {
+                        self.ui.connect_error = None;
+                        self.screen = Screen::Lobby;
+                        let socket = UdpSocket::bind(self.id).unwrap();
+                        let connection_config = ConnectionConfig {
+                            channels_config: channels_config(),
+                            ..Default::default()
+                        };
+                        self.id = socket.local_addr().unwrap();
+                        let client =
+                            UdpClient::new(socket, server_addr, connection_config).unwrap();
+                        self.client = Some(client);
                     }
                 }
-                */
             }
             Screen::Lobby => {
-                if let Some(connection) = self.connection.as_mut() {
+                if let Some(connection) = self.client.as_mut() {
                     if draw_lobby(&self.lobby_info, self.id) {
                         let message = bincode::serialize(&ClientAction::LobbyReady).unwrap();
-                        if let Err(e) = connection.send_message(Channels::Reliable.into(), message)
-                        {
+                        if let Err(e) = connection.send_message(Channel::Reliable.id(), message) {
                             println!("error sending message: {}", e);
                         }
                     }
@@ -229,12 +221,13 @@ impl App {
                     self.lobby_info = LobbyInfo::default();
                 }
             }
-            Screen::MainMenu => {}
         }
 
         // Send messages to server
-        if let Some(connection) = self.connection.as_mut() {
-            connection.send_packets().unwrap();
+        if let Some(connection) = self.client.as_mut() {
+            if let Err(e) = connection.send_packets() {
+                error!("{}", e);
+            }
         }
 
         set_default_camera();
@@ -267,22 +260,36 @@ impl App {
         );
     }
 
+    fn host(&mut self, server_addr: SocketAddr) {
+        let s = Game::new(server_addr).unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        self.id = socket.local_addr().unwrap();
+
+        let connection_config = ConnectionConfig {
+            channels_config: channels_config(),
+            ..Default::default()
+        };
+        let client_udp = UdpClient::new(socket, server_addr, connection_config).unwrap();
+        self.client = Some(client_udp);
+        self.screen = Screen::Lobby;
+        self.server = Some(s);
+    }
+
     fn render_gameplayer(&mut self) {
-        if self.connection.is_none() {
+        if self.client.is_none() {
             return;
         }
 
-        let connection = self.connection.as_mut().unwrap();
-
-        self.world.run(track_client_entity).unwrap();
+        let connection = self.client.as_mut().unwrap();
+        self.world.run_with_data(track_client_entity, self.id).unwrap();
 
         let input = self.world.run(player_input).unwrap();
         let message = bincode::serialize(&input).expect("failed to serialize message.");
-        if let Err(e) = connection.send_message(Channels::ReliableCritical.into(), message) {
+        if let Err(e) = connection.send_message(Channel::ReliableCritical.id(), message) {
             println!("Error sending message: {}", e);
         }
 
-        while let Ok(Some(message)) = connection.receive_message(Channels::Unreliable.into()) {
+        while let Some(message) = connection.receive_message(Channel::Unreliable.id()) {
             let server_frame = bincode::deserialize::<ServerFrame>(&message);
             if let Ok(server_frame) = server_frame {
                 server_frame.apply_in_world(&self.world);

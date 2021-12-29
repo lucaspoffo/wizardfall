@@ -83,8 +83,8 @@ pub async fn load_project_and_assets(world: &World) {
     for tileset in project.defs.as_ref().unwrap().tilesets.iter() {
         let texture_path = format!("{}{}", BASE_DIR, &tileset.rel_path[..]);
         println!("Texture path: {}", texture_path);
-        let texture = load_texture(&texture_path).await;
-        set_texture_filter(texture, FilterMode::Nearest);
+        let texture = load_texture(&texture_path).await.unwrap();
+        texture.set_filter(FilterMode::Nearest);
 
         let tile_size = Vec2::new(tileset.tile_grid_size as f32, tileset.tile_grid_size as f32);
         let grid_size = vec2(
@@ -103,7 +103,7 @@ pub async fn load_project_and_assets(world: &World) {
         if let Some(bg_rel_path) = level.bg_rel_path.as_ref() {
             if !textures.0.contains_key(bg_rel_path) {
                 let texture_path = format!("{}{}", BASE_DIR, &bg_rel_path[..]);
-                let bg_texture = load_texture(&texture_path).await;
+                let bg_texture = load_texture(&texture_path).await.unwrap();
                 textures.0.insert(bg_rel_path.clone(), bg_texture);
             }
         }

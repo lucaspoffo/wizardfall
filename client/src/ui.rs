@@ -1,11 +1,9 @@
 use macroquad::prelude::*;
 use shared::math::remap;
-use shared::timer::Timer;
 use shared::{ClientInfo, LobbyInfo, PlayersScore};
 use shipyard::UniqueView;
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use crate::{RX, RY, UPSCALE};
 
@@ -26,22 +24,12 @@ pub fn draw_rectangle_lines_upscaled(x: f32, y: f32, w: f32, h: f32, thickness: 
 
 pub struct UiState {
     pub connect_error: Option<String>,
-    input_name: InputState,
-    input_ip: InputState,
-    connection_text_timer: Timer,
-    dot_count: usize,
+    input_ip: TextInputState,
 }
 
 impl Default for UiState {
     fn default() -> Self {
-        let input_name = InputState {
-            rect: Rect::new(RX / 2. - 50., 80.0, 150., 20.),
-            label: "Name:".into(),
-            ..Default::default()
-        };
-
-        let input_ip = InputState {
-            rect: Rect::new(RX / 2. - 50., 110.0, 150., 20.),
+        let input_ip = TextInputState {
             label: "IP:".into(),
             text: "127.0.0.1:5000".into(),
             ..Default::default()
@@ -50,39 +38,34 @@ impl Default for UiState {
         Self {
             connect_error: None,
             input_ip,
-            input_name,
-            connection_text_timer: Timer::new(Duration::from_millis(400)),
-            dot_count: 0,
         }
     }
 }
 
-struct InputState {
+struct TextInputState {
     focused: bool,
     text: String,
     label: String,
-    rect: Rect,
     max_text_length: usize,
 }
 
-impl Default for InputState {
+impl Default for TextInputState {
     fn default() -> Self {
         Self {
             max_text_length: 20,
             label: "Label:".into(),
-            rect: Rect::new(0., 0., 300., 30.),
             focused: false,
             text: String::new(),
         }
     }
 }
 
-impl InputState {
-    fn update(&mut self, mouse_position: Vec2) {
+impl TextInputState {
+    fn update(&mut self, rect: Rect, mouse_position: Vec2) {
         if is_mouse_button_pressed(MouseButton::Left) {
-            mouse_to_screen();
-            self.focused = self.rect.contains(mouse_position);
-            while get_char_pressed().is_some() {}
+            self.focused = rect.contains(mouse_position);
+            // Clear input queue
+            while let Some(_) = get_char_pressed() {}
         }
 
         while self.text.len() > self.max_text_length {
@@ -90,8 +73,8 @@ impl InputState {
         }
 
         if self.focused {
-            while let Some(char) = get_char_pressed() {
-                self.text.push(char);
+            while let Some(c) = get_char_pressed() {
+                self.text.push(c);
             }
             if is_key_pressed(KeyCode::Backspace) {
                 self.text.pop();
@@ -99,20 +82,25 @@ impl InputState {
         }
     }
 
-    fn draw(&self) {
+    fn draw(&self, rect: Rect) {
         let color = if self.focused { YELLOW } else { WHITE };
 
-        draw_text_upscaled(&self.label, self.rect.x - 40., self.rect.y - 2., 16., WHITE);
-
-        draw_rectangle_lines_upscaled(
-            self.rect.x,
-            self.rect.y,
-            self.rect.w,
-            self.rect.h,
-            2.0,
-            color,
+        draw_text_upscaled(
+            &self.label,
+            rect.x - 40.,
+            rect.y + rect.h / 2. + 4.,
+            16.,
+            WHITE,
         );
-        draw_text_upscaled(&self.text, self.rect.x + 4., self.rect.y - 2., 16., WHITE);
+
+        draw_rectangle_lines_upscaled(rect.x, rect.y, rect.w, rect.h, 2.0, color);
+        draw_text_upscaled(
+            &self.text,
+            rect.x + 4.,
+            rect.y + rect.h / 2. + 4.,
+            16.,
+            WHITE,
+        );
     }
 }
 
@@ -129,36 +117,55 @@ fn draw_button(rect: Rect, text: &str) -> bool {
     };
 
     draw_rectangle_lines_upscaled(rect.x, rect.y, rect.w, rect.h, 2.0, color);
-    draw_text_upscaled(text, rect.x + 4., rect.y - 2., 16., color);
+    draw_text_upscaled(text, rect.x + 4., rect.y + rect.h / 2. + 4., 16., color);
 
     clicked
 }
 
-pub fn draw_connect_menu(ui: &mut UiState) -> Option<SocketAddr> {
-    let mouse_position = mouse_to_screen();
-    ui.input_ip.update(mouse_position);
-    ui.input_ip.draw();
+pub struct ConnectMenuResponse {
+    pub connect: bool,
+    pub host: bool,
+    pub addr: Option<SocketAddr>,
+}
 
-    ui.input_name.update(mouse_position);
-    ui.input_name.draw();
+pub fn draw_connect_menu(ui: &mut UiState) -> ConnectMenuResponse {
+    let mouse_position = mouse_to_screen();
+    let rect = Rect::new(RX / 2. - 50., 50.0, 150., 20.);
+    ui.input_ip.update(rect, mouse_position);
+    ui.input_ip.draw(rect);
 
     if let Some(error) = ui.connect_error.as_ref() {
-        draw_text_upscaled(&error, (RX - 100.) / 2., 130., 16., RED);
-    }
-
-    if draw_button(Rect::new((RX - 60.) / 2., 160.0, 58., 20.), &"connect") {
-        if let Ok(ip) = ui.input_ip.text.parse() {
-            return Some(ip);
-        } else {
-            ui.connect_error = Some("Invalid IP address".into());
+        let mut offset = 0.;
+        for error_line in error.split(':') {
+            draw_text_upscaled(error_line.trim(), (RX - 100.) / 2., 82. + offset, 12., RED);
+            offset += 10.;
         }
     }
-    None
+
+    let host = draw_button(Rect::new((RX - 36.) / 2., 100.0, 36., 20.), &"host");
+    let connect = draw_button(Rect::new((RX - 58.) / 2., 130.0, 58., 20.), &"connect");
+
+    let ip_error = String::from("Invalid :IP address");
+    let mut addr = None;
+    if let Ok(ip) = ui.input_ip.text.parse() {
+        addr = Some(ip);
+        if ui.connect_error == Some(ip_error) {
+            ui.connect_error = None;
+        }
+    } else {
+        ui.connect_error = Some(ip_error);
+    }
+
+    ConnectMenuResponse {
+        connect,
+        host,
+        addr,
+    }
 }
 
 pub fn mouse_to_screen() -> Vec2 {
     let mut pos: Vec2 = mouse_position().into();
-    
+
     let desired_aspect_ratio = RX / RY;
     let current_aspect_ratio = screen_width() / screen_height();
 
@@ -188,33 +195,22 @@ pub fn mouse_to_screen() -> Vec2 {
     pos
 }
 
-pub fn draw_connection_screen(ui: &mut UiState) {
-    if ui.connection_text_timer.is_finished() {
-        ui.connection_text_timer.reset();
-        ui.dot_count += 1;
-        ui.dot_count %= 4;
-    }
-
-    let text = format!("Connecting{}", ".".repeat(ui.dot_count));
-    draw_text_upscaled(&text, (RX - 140.) / 2. , (RY - 40.) / 2., 32., WHITE);
-}
-
-pub fn draw_lobby(lobby_info: &LobbyInfo, id: u64) -> bool {
+pub fn draw_lobby(lobby_info: &LobbyInfo, id: SocketAddr) -> bool {
     let mut response = false;
-    let mut clients: Vec<(&u64, &ClientInfo)> = lobby_info.clients.iter().collect();
+    let mut clients: Vec<(&SocketAddr, &ClientInfo)> = lobby_info.clients.iter().collect();
     clients.sort_by(|a, b| a.0.cmp(b.0));
     for (i, (&client_id, client_info)) in clients.iter().enumerate() {
         let x = 10. + i as f32 * 80.;
-        draw_text_upscaled(&client_id.to_string(), x, 20., 16., WHITE);
+        draw_text_upscaled(&client_id.port().to_string(), x + 16., 20., 16., WHITE);
         let text = if client_info.ready {
             "ready"
         } else {
             "waiting"
         };
-        if client_id == id {
-            response = draw_button(Rect::new(x + 5., 70., 60., 20.), &text);
+        if client_id.port() == id.port() {
+            response = draw_button(Rect::new(x + 5., 30., 60., 20.), &text);
         } else {
-            draw_text_upscaled(&text, x + 5., 68., 16., WHITE);
+            draw_text_upscaled(&text, x + 9., 44., 16., WHITE);
         }
     }
     response
@@ -223,9 +219,9 @@ pub fn draw_lobby(lobby_info: &LobbyInfo, id: u64) -> bool {
 pub fn draw_score(players_score: UniqueView<PlayersScore>) {
     let mut offset_x = 0.;
     for (client_id, score) in players_score.score.iter() {
-        let text = format!("{}: {}", client_id, score);
-        draw_rectangle_lines_upscaled(10. + offset_x, 10., 70., 16., 2., WHITE);
-        draw_text_upscaled(&text, 14. + offset_x, 10., 10., WHITE);
-        offset_x += 80.;
+        let text = format!("{}: {}", client_id.port(), score);
+        draw_rectangle_lines_upscaled(10. + offset_x, 4., 50., 16., 2., WHITE);
+        draw_text_upscaled(&text, 14. + offset_x, 14., 10., WHITE);
+        offset_x += 60.;
     }
 }
