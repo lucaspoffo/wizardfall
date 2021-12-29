@@ -281,7 +281,9 @@ impl App {
         }
 
         let connection = self.client.as_mut().unwrap();
-        self.world.run_with_data(track_client_entity, self.id).unwrap();
+        self.world
+            .run_with_data(track_client_entity, self.id)
+            .unwrap();
 
         let input = self.world.run(player_input).unwrap();
         let message = bincode::serialize(&input).expect("failed to serialize message.");
@@ -305,7 +307,9 @@ impl App {
 
         // Debug server physics when host
         if let Some(server) = self.server.as_ref() {
-            server.world.run_with_data(render_physics, UPSCALE).unwrap();
+            if false {
+                server.world.run_with_data(render_physics, UPSCALE).unwrap();
+            }
         }
     }
 }
