@@ -9,5 +9,10 @@ Simple platform game to test the Renet API, features:
 - Custom physics
 - Level creation with [LDtk](https://ldtk.io/)
 
+#### How to run
+You can host using the client, so there is no need to run the server separated. Run the client with:
+- `cd client`
+- `cargo run`
+
 ## Preview
 ![demo gif](windfall.gif)
